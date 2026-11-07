@@ -39,7 +39,9 @@ function LoginPage() {
       const { salt, params } = await api.post<SaltResponse>("/api/auth/salt", { email });
       const key = await deriveKey(password, salt, params);
       await api.post("/api/auth/login", { email, key });
-      await queryClient.invalidateQueries({ queryKey: meQueryKey });
+      // "all": the login screen has no observer of this query, so the default "active" would leave a
+      // cached signed-out answer in place and the root gate would send the user straight back here.
+      await queryClient.invalidateQueries({ queryKey: meQueryKey, refetchType: "all" });
       router.history.push(safeNext(next));
     } catch (err) {
       setError(errorMessage(err));
