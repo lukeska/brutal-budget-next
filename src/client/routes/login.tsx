@@ -5,13 +5,7 @@ import { type FormEvent, useState } from "react";
 import { deriveKey } from "../features/auth/derive-key";
 import { meQueryKey } from "../features/auth/use-me";
 import { ApiError, api } from "../lib/api";
-
-/** Only same-site relative paths ("/x", never "//host" or "/\host") may be redirected to. */
-function safeNext(value: unknown): string {
-  if (typeof value !== "string" || !value.startsWith("/")) return "/";
-  if (value.startsWith("//") || value.startsWith("/\\")) return "/";
-  return value;
-}
+import { safeNext } from "../lib/safe-next";
 
 export const Route = createFileRoute("/login")({
   validateSearch: (search: Record<string, unknown>): { next?: string } =>

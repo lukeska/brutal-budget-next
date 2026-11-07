@@ -11,6 +11,12 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as SetupRouteImport } from './routes/setup'
+import { Route as AccountsIndexRouteImport } from './routes/accounts/index'
+import { Route as CategoriesIndexRouteImport } from './routes/categories/index'
+import { Route as ProjectsIndexRouteImport } from './routes/projects/index'
+import { Route as SettingsIndexRouteImport } from './routes/settings/index'
+import { Route as StatisticsIndexRouteImport } from './routes/statistics/index'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -22,31 +28,110 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SetupRoute = SetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AccountsIndexRoute = AccountsIndexRouteImport.update({
+  id: '/accounts/',
+  path: '/accounts/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CategoriesIndexRoute = CategoriesIndexRouteImport.update({
+  id: '/categories/',
+  path: '/categories/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
+  id: '/projects/',
+  path: '/projects/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsIndexRoute = SettingsIndexRouteImport.update({
+  id: '/settings/',
+  path: '/settings/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StatisticsIndexRoute = StatisticsIndexRouteImport.update({
+  id: '/statistics/',
+  path: '/statistics/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/setup': typeof SetupRoute
+  '/accounts/': typeof AccountsIndexRoute
+  '/categories/': typeof CategoriesIndexRoute
+  '/projects/': typeof ProjectsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
+  '/statistics/': typeof StatisticsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/setup': typeof SetupRoute
+  '/accounts': typeof AccountsIndexRoute
+  '/categories': typeof CategoriesIndexRoute
+  '/projects': typeof ProjectsIndexRoute
+  '/settings': typeof SettingsIndexRoute
+  '/statistics': typeof StatisticsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/setup': typeof SetupRoute
+  '/accounts/': typeof AccountsIndexRoute
+  '/categories/': typeof CategoriesIndexRoute
+  '/projects/': typeof ProjectsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
+  '/statistics/': typeof StatisticsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/login'
+  fullPaths:
+    | '/'
+    | '/login'
+    | '/setup'
+    | '/accounts/'
+    | '/categories/'
+    | '/projects/'
+    | '/settings/'
+    | '/statistics/'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/login'
-  id: '__root__' | '/' | '/login'
+  to:
+    | '/'
+    | '/login'
+    | '/setup'
+    | '/accounts'
+    | '/categories'
+    | '/projects'
+    | '/settings'
+    | '/statistics'
+  id:
+    | '__root__'
+    | '/'
+    | '/login'
+    | '/setup'
+    | '/accounts/'
+    | '/categories/'
+    | '/projects/'
+    | '/settings/'
+    | '/statistics/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
+  SetupRoute: typeof SetupRoute
+  AccountsIndexRoute: typeof AccountsIndexRoute
+  CategoriesIndexRoute: typeof CategoriesIndexRoute
+  ProjectsIndexRoute: typeof ProjectsIndexRoute
+  SettingsIndexRoute: typeof SettingsIndexRoute
+  StatisticsIndexRoute: typeof StatisticsIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -65,12 +150,60 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/setup': {
+      id: '/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof SetupRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/accounts/': {
+      id: '/accounts/'
+      path: '/accounts'
+      fullPath: '/accounts/'
+      preLoaderRoute: typeof AccountsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/categories/': {
+      id: '/categories/'
+      path: '/categories'
+      fullPath: '/categories/'
+      preLoaderRoute: typeof CategoriesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects/': {
+      id: '/projects/'
+      path: '/projects'
+      fullPath: '/projects/'
+      preLoaderRoute: typeof ProjectsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/': {
+      id: '/settings/'
+      path: '/settings'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof SettingsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/statistics/': {
+      id: '/statistics/'
+      path: '/statistics'
+      fullPath: '/statistics/'
+      preLoaderRoute: typeof StatisticsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
+  SetupRoute: SetupRoute,
+  AccountsIndexRoute: AccountsIndexRoute,
+  CategoriesIndexRoute: CategoriesIndexRoute,
+  ProjectsIndexRoute: ProjectsIndexRoute,
+  SettingsIndexRoute: SettingsIndexRoute,
+  StatisticsIndexRoute: StatisticsIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
