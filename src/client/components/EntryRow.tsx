@@ -155,12 +155,14 @@ export function EntryRow({ entry }: { entry: MonthEntry }) {
 
   return (
     <li className="relative overflow-hidden border-b border-rule">
-      <span
-        aria-hidden="true"
-        className="absolute inset-0 flex items-center justify-end bg-negative pr-4 text-sm font-medium text-bg"
-      >
-        Delete
-      </span>
+      {offset !== 0 && (
+        <span
+          aria-hidden="true"
+          className="absolute inset-0 flex items-center justify-end bg-negative pr-4 text-sm font-medium text-bg"
+        >
+          Delete
+        </span>
+      )}
       <button
         type="button"
         className={cn(ROW, offset === 0 && "transition-transform", "touch-pan-y")}

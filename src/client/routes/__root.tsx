@@ -114,7 +114,10 @@ function RootLayout() {
     <div className="min-h-dvh">
       <OfflineBanner />
       {desktop ? <TopBar /> : <MobileMenu />}
-      <Outlet />
+      {/* On phones, leave room below the content for the floating add button. */}
+      <div className={desktop ? undefined : "pb-28"}>
+        <Outlet />
+      </div>
       {!desktop && <AddButton variant="floating" />}
       <DrawerHost />
       <Toaster />
