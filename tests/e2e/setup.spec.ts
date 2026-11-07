@@ -13,9 +13,7 @@ async function fillPartner(page: Page, name: string, email: string, password: st
 test("a fresh deployment is claimed through the wizard, which signs in partner 1 and then closes", async ({
   page,
   baseURL,
-}, testInfo) => {
-  // Setup works once per deployment and every project shares the same local database.
-  test.skip(testInfo.project.name !== "desktop", "setup can only run once per deployment");
+}) => {
   test.setTimeout(120_000);
 
   const before = await page.request.get("/api/setup/status");

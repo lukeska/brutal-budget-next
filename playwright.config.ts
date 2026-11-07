@@ -13,9 +13,21 @@ export default defineConfig({
     baseURL: `http://localhost:${PORT}`,
     trace: "retain-on-failure",
   },
+  // Setup claims the shared local deployment once; every other spec runs after it, signed in as its partners.
   projects: [
-    { name: "desktop", use: { ...devices["Desktop Chrome"] } },
-    { name: "mobile", use: { ...devices["Pixel 7"] } },
+    { name: "setup", testMatch: /setup\.spec\.ts/, use: { ...devices["Desktop Chrome"] } },
+    {
+      name: "desktop",
+      testIgnore: /setup\.spec\.ts/,
+      dependencies: ["setup"],
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "mobile",
+      testIgnore: /setup\.spec\.ts/,
+      dependencies: ["setup"],
+      use: { ...devices["Pixel 7"] },
+    },
   ],
   webServer: {
     command: `node scripts/e2e-server.mjs ${PORT}`,
