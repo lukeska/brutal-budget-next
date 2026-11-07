@@ -4,6 +4,7 @@ import type { AppEnv } from "./lib/env";
 import { HttpError } from "./lib/errors";
 import { authRoutes } from "./routes/auth";
 import { ratesRoutes } from "./routes/rates";
+import { setupRoutes } from "./routes/setup";
 
 export type { AppEnv } from "./lib/env";
 
@@ -23,6 +24,7 @@ export function createApp() {
   app.use("/setup", requireStrongSecrets, authRateLimit);
   app.use("/setup/*", requireStrongSecrets, authRateLimit);
   app.route("/auth", authRoutes);
+  app.route("/", setupRoutes);
 
   // Everything below needs a signed-in partner.
   app.use("/rates", requireSession);
