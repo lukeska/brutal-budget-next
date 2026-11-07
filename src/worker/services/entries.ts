@@ -379,6 +379,16 @@ export type CreateResult = { status: 200 | 201; entry: Entry };
  * Creates an entry under the client's id. Posting the same payload again returns the stored row;
  * a different payload under an existing id is a conflict. Undoing a delete posts the old id again.
  */
+/** SQL guard: account (?5) and optional to-account (?7) still have the validated currencies (?19, ?20). */
+const CURRENCIES_UNCHANGED = `(SELECT currency FROM accounts WHERE id = ?5) = ?19
+         AND (?7 IS NULL OR (SELECT currency FROM accounts WHERE id = ?7) = ?20)`;
+/** Same guard for the update statement, whose account is ?3, to-account ?5 and currencies ?19, ?20. */
+const CURRENCIES_UNCHANGED_FOR_UPDATE = `(SELECT currency FROM accounts WHERE id = ?3) = ?19
+         AND (?5 IS NULL OR (SELECT currency FROM accounts WHERE id = ?5) = ?20)`;
+const ACCOUNT_CURRENCY_CHANGED = new HttpError(409, "account_currency_changed", {
+  message: "An account's currency changed while you were editing — reload and try again",
+});
+
 export async function createEntry(
   d1: D1Database,
   sessionUserId: string,
@@ -402,12 +412,15 @@ export async function createEntry(
   );
   const value = await baseValueFor(d1, values, refs);
   const now = nowIso();
+  // The insert only lands while the accounts still have the currencies the amounts were validated
+  // against, so a concurrent currency change can't leave an entry in the wrong currency.
   const { meta } = await d1
     .prepare(
       `INSERT INTO entries (id, kind, date, user_id, account_id, account_amount_minor, to_account_id,
          to_amount_minor, orig_currency, orig_amount_minor, base_amount_minor, fx_state, rate_scaled,
          rate_date, category_id, project_id, notes, version, created_at, updated_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, 1, ?18, ?18)
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, 1, ?18, ?18
+       WHERE ${CURRENCIES_UNCHANGED}
        ON CONFLICT (id) DO NOTHING`,
     )
     .bind(
@@ -429,11 +442,13 @@ export async function createEntry(
       values.projectId,
       values.notes,
       now,
+      refs.accounts.get(values.accountId)?.currency ?? null,
+      values.toAccountId ? (refs.accounts.get(values.toAccountId)?.currency ?? null) : null,
     )
     .run();
 
   const row = await readRow(d1, input.id);
-  if (!row) throw new Error("entry vanished after insert");
+  if (!row) throw ACCOUNT_CURRENCY_CHANGED;
   // A concurrent create with the same id won the race: treat ours as a retry.
   if (meta.changes === 0) return replay(row);
   return { status: 201, entry: toEntry(row) };
@@ -544,7 +559,7 @@ export async function updateEntry(d1: D1Database, id: string, patch: EntryPatch)
          to_account_id = ?5, to_amount_minor = ?6, orig_currency = ?7, orig_amount_minor = ?8,
          base_amount_minor = ?9, fx_state = ?10, rate_scaled = ?11, rate_date = ?12, category_id = ?13,
          project_id = ?14, notes = ?15, version = version + 1, updated_at = ?16
-       WHERE id = ?17 AND version = ?18 AND kind <> 'adjustment'`,
+       WHERE id = ?17 AND version = ?18 AND kind <> 'adjustment' AND ${CURRENCIES_UNCHANGED_FOR_UPDATE}`,
     )
     .bind(
       values.date,
@@ -565,12 +580,17 @@ export async function updateEntry(d1: D1Database, id: string, patch: EntryPatch)
       nowIso(),
       id,
       patch.version,
+      refs.accounts.get(values.accountId)?.currency ?? null,
+      values.toAccountId ? (refs.accounts.get(values.toAccountId)?.currency ?? null) : null,
     )
     .run();
 
   const current = await readRow(d1, id);
   if (!current) throw new HttpError(404, "not_found");
-  if (meta.changes === 0) throw conflict(current);
+  if (meta.changes === 0) {
+    if (current.version === patch.version) throw ACCOUNT_CURRENCY_CHANGED;
+    throw conflict(current);
+  }
   return toEntry(current);
 }
 
