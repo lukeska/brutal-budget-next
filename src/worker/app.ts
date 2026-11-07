@@ -3,6 +3,7 @@ import { authRateLimit, csrfGuard, requireSession, requireStrongSecrets } from "
 import type { AppEnv } from "./lib/env";
 import { HttpError } from "./lib/errors";
 import { authRoutes } from "./routes/auth";
+import { entriesRoutes } from "./routes/entries";
 import { ratesRoutes } from "./routes/rates";
 import { setupRoutes } from "./routes/setup";
 
@@ -30,6 +31,9 @@ export function createApp() {
   app.use("/rates", requireSession);
   app.use("/rates/*", requireSession);
   app.route("/", ratesRoutes);
+  app.use("/entries", requireSession);
+  app.use("/entries/*", requireSession);
+  app.route("/", entriesRoutes);
 
   app.notFound((c) => c.json({ error: "not_found" }, 404));
 
