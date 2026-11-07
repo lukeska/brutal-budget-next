@@ -9,7 +9,9 @@
       "!src/client/routeTree.gen.ts",
       "!src/worker/worker-configuration.d.ts",
       "!migrations/meta",
-      "!docs"
+      "!docs",
+      "!**/test-results",
+      "!**/playwright-report"
     ]
   },
   "formatter": {

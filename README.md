@@ -113,13 +113,13 @@ npm run db:migrate:local
 npm run dev                      # http://localhost:5173
 ```
 
-| Command | What it does |
-|---|---|
-| `npm test` | Unit and API tests (the API tests run in the Workers runtime against a local D1) |
-| `npm run test:e2e` | Browser tests against a locally served build |
-| `npm run typecheck` | TypeScript |
-| `npm run lint` | Biome |
-| `npm run db:generate` | Generate a migration after changing `src/worker/db/schema.ts` |
+| Command               | What it does                                                                     |
+| --------------------- | -------------------------------------------------------------------------------- |
+| `npm test`            | Unit and API tests (the API tests run in the Workers runtime against a local D1) |
+| `npm run test:e2e`    | Browser tests against a locally served build                                     |
+| `npm run typecheck`   | TypeScript                                                                       |
+| `npm run lint`        | Biome                                                                            |
+| `npm run db:generate` | Generate a migration after changing `src/worker/db/schema.ts`                    |
 
 The stack: one Cloudflare Worker serves a [Hono](https://hono.dev) API under `/api` and the React single-page app as static assets; data lives in D1; a cron trigger refreshes exchange rates.
 

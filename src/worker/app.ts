@@ -6,6 +6,7 @@ import { accountsRoutes } from "./routes/accounts";
 import { authRoutes } from "./routes/auth";
 import { categoriesRoutes } from "./routes/categories";
 import { entriesRoutes } from "./routes/entries";
+import { importRoutes } from "./routes/import";
 import { monthRoutes } from "./routes/month";
 import { projectsRoutes } from "./routes/projects";
 import { ratesRoutes } from "./routes/rates";
@@ -28,8 +29,10 @@ export function createApp() {
 
   // Auth and setup refuse to run with weak secrets; setup shares the login rate limit.
   app.use("/auth/*", requireStrongSecrets);
-  app.use("/setup", requireStrongSecrets, authRateLimit);
-  app.use("/setup/*", requireStrongSecrets, authRateLimit);
+  app.use("/setup", requireStrongSecrets);
+  app.use("/setup/*", requireStrongSecrets);
+  // Only setup attempts share the login rate limit; the status check runs on every page load.
+  app.on("POST", ["/setup", "/setup/*"], authRateLimit);
   app.route("/auth", authRoutes);
   app.route("/", setupRoutes);
 
@@ -59,6 +62,9 @@ export function createApp() {
   app.use("/month", requireSession);
   app.use("/month/*", requireSession);
   app.route("/", monthRoutes);
+  app.use("/import", requireSession);
+  app.use("/import/*", requireSession);
+  app.route("/", importRoutes);
 
   app.notFound((c) => c.json({ error: "not_found" }, 404));
 

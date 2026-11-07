@@ -80,6 +80,19 @@ describe("setup status", () => {
   });
 });
 
+describe("setup status rate limiting", () => {
+  it("answers every page load from one IP, since only setup attempts are rate-limited", async () => {
+    const statuses: number[] = [];
+    for (let i = 0; i < 40; i++) {
+      const res = await exports.default.fetch("https://app.test/api/setup/status", {
+        headers: { "cf-connecting-ip": "203.0.113.77" },
+      });
+      statuses.push(res.status);
+    }
+    expect(new Set(statuses)).toEqual(new Set([200]));
+  });
+});
+
 describe("POST /api/setup", () => {
   it("creates the household, both partners, the account and default categories, and signs in partner 1", async () => {
     const res = await postSetup(validBody());
