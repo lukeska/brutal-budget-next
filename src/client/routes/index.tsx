@@ -2,7 +2,7 @@ import type { CurrencyCode } from "@shared/money";
 import type { MonthCategory, MonthEntry, MonthResponse } from "@shared/schemas/month";
 import { IconChevronDown, IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { CategoryIcon, ColourDot } from "../components/CategoryIcon";
 import { EntryRow } from "../components/EntryRow";
@@ -185,7 +185,14 @@ function MonthBody({ data, display }: { data: MonthResponse; display: DisplayCur
       {data.entries.length === 0 ? (
         <Empty
           title="Nothing logged this month"
-          action={<Button onClick={() => openCreate("expense")}>Add your first expense</Button>}
+          action={
+            <div className="flex flex-wrap items-center gap-4">
+              <Button onClick={() => openCreate("expense")}>Add your first expense</Button>
+              <Link to="/import" className="text-sm underline underline-offset-4">
+                or import a CSV
+              </Link>
+            </div>
+          }
         />
       ) : (
         <>

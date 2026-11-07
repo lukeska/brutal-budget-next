@@ -2,7 +2,7 @@ import type { MeResponse } from "@shared/auth";
 import { CURRENCIES, CURRENCY_CODES } from "@shared/money";
 import type { SettingsResponse, ThemeChoice } from "@shared/schemas/settings";
 import { useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, useNavigate, useRouterState } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { type FormEvent, type ReactNode, useState } from "react";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -405,6 +405,14 @@ export function SettingsPage() {
         <DisplaySection settings={settings.data} />
         <PartnerSection settings={settings.data} />
         <HouseholdSection settings={settings.data} />
+        <Section title="Import">
+          <p className="max-w-prose text-sm text-muted">
+            Bring in expenses and income from a CSV file, for example your history from another app.
+          </p>
+          <Link to="/import" className="w-fit underline underline-offset-4">
+            Import from CSV
+          </Link>
+        </Section>
       </div>
     </Page>
   );
