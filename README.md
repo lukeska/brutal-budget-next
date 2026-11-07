@@ -123,7 +123,7 @@ npm run dev                      # http://localhost:5173
 
 The stack: one Cloudflare Worker serves a [Hono](https://hono.dev) API under `/api` and the React single-page app as static assets; data lives in D1; a cron trigger refreshes exchange rates.
 
-> **Writing migrations by hand.** If a schema change needs SQLite to rebuild a table, drizzle-kit's generated SQL (create `__new_x`, copy, drop, rename) fails D1's foreign-key checks. Rewrite it as: copy the table to `x_old`, drop `x`, create `x` with the new shape, copy the rows back, drop `x_old`.
+> **Writing migrations by hand.** If a schema change needs SQLite to rebuild a table, drizzle-kit's generated SQL (create `__new_x`, copy, drop, rename) fails D1's foreign-key checks. Rewrite it as: start with `PRAGMA defer_foreign_keys = ON;`, copy the table to `x_old`, drop `x`, create `x` with the new shape, copy the rows back, drop `x_old`, then recreate every index `x` had (dropping a table drops its indexes; copy them from `migrations/0000_init.sql`, including partial ones such as `entries_fingerprint_unique`, which CSV duplicate detection relies on). `PRAGMA foreign_key_check` should return no rows afterwards. Rebuilding `users` deletes every session through `ON DELETE CASCADE`, so everyone is signed out.
 
 ## License
 

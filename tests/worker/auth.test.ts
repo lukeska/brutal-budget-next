@@ -86,9 +86,14 @@ async function attemptRows() {
 beforeEach(async () => {
   const now = new Date().toISOString();
   await db.batch(
-    ["DELETE FROM login_attempts", "DELETE FROM sessions", "DELETE FROM users", "DELETE FROM household"].map(
-      (s) => db.prepare(s),
-    ),
+    [
+      "DELETE FROM login_attempts",
+      "DELETE FROM sessions",
+      // A partner reset points one user at the other; clear it so the users can go.
+      "UPDATE users SET password_reset_by = NULL",
+      "DELETE FROM users",
+      "DELETE FROM household",
+    ].map((s) => db.prepare(s)),
   );
   const insertUser = db.prepare(
     `INSERT INTO users (id, email, name, salt, verifier, created_at, updated_at)
@@ -398,6 +403,44 @@ describe("password change", () => {
       body: { currentKey: WRONG_KEY, newSalt: saltOf(5), newVerifierKey: keyOf(5) },
     });
     expect(res.status).toBe(401);
+  });
+});
+
+describe("current-key checks", () => {
+  const endpoints = [
+    {
+      path: "/api/auth/password",
+      body: (key: string) => ({ currentKey: key, newSalt: saltOf(5), newVerifierKey: keyOf(5) }),
+    },
+    {
+      path: "/api/auth/password/reset-partner",
+      body: (key: string) => ({ currentKey: key, partnerNewSalt: saltOf(7), partnerNewKey: keyOf(7) }),
+    },
+    { path: "/api/settings/email", body: (key: string) => ({ currentKey: key, email: "new@example.com" }) },
+  ];
+
+  it.each(endpoints)(
+    "$path counts wrong keys like logins: the 11th from one IP gets 429",
+    async ({ path, body }) => {
+      vi.spyOn(scheduler, "wait").mockResolvedValue(undefined);
+      const cookie = await login(ALICE);
+      const ip = freshIp();
+      for (let i = 0; i < 10; i++) {
+        expect((await post(path, { cookie, ip, body: body(WRONG_KEY) })).status).toBe(401);
+      }
+      expect((await post(path, { cookie, ip, body: body(ALICE.key) })).status).toBe(429);
+      // The partner's own login from elsewhere still works.
+      expect((await post("/api/auth/login", { body: { email: ALICE.email, key: ALICE.key } })).status).toBe(
+        200,
+      );
+    },
+  );
+
+  it.each(endpoints)("$path shares the per-IP auth rate limit", async ({ path, body }) => {
+    const ip = freshIp();
+    const statuses: number[] = [];
+    for (let i = 0; i < 25; i++) statuses.push((await post(path, { ip, body: body(WRONG_KEY) })).status);
+    expect(statuses).toContain(429);
   });
 });
 

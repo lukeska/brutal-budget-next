@@ -49,6 +49,7 @@ interface EntryRow {
   category_id: string | null;
   project_id: string | null;
   notes: string | null;
+  fingerprint: string | null;
   import_batch_id: string | null;
   version: number;
   created_at: string;
@@ -67,7 +68,8 @@ interface EntryRow {
 
 const ENTRIES_SQL = `SELECT e.id, e.kind, e.date, e.user_id, e.account_id, e.account_amount_minor, e.to_account_id,
     e.to_amount_minor, e.orig_currency, e.orig_amount_minor, e.base_amount_minor, e.fx_state, e.rate_scaled,
-    e.rate_date, e.category_id, e.project_id, e.notes, e.import_batch_id, e.version, e.created_at, e.updated_at,
+    e.rate_date, e.category_id, e.project_id, e.notes, e.fingerprint, e.import_batch_id, e.version,
+    e.created_at, e.updated_at,
     a.currency AS account_currency, a.name AS account_name,
     ta.currency AS to_currency, ta.name AS to_account_name,
     u.name AS user_name,
@@ -104,6 +106,7 @@ function toMonthEntry(r: EntryRow): MonthEntry {
     categoryId: r.category_id,
     projectId: r.project_id,
     notes: r.notes,
+    fingerprint: r.fingerprint,
     importBatchId: r.import_batch_id,
     version: r.version,
     createdAt: r.created_at,

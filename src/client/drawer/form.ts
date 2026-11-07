@@ -238,3 +238,18 @@ export function errorsFromIssues(issues: { path: (string | number)[]; message: s
   }
   return errors;
 }
+
+/**
+ * After a conflict, rebuilds the form on the entry as it now is: fields the partner changed since `baseline`
+ * (the form as first loaded) keep their edits, every other field takes the fresh value, so neither partner's
+ * change is silently overwritten.
+ */
+export function rebaseForm(current: EntryForm, baseline: EntryForm, fresh: Entry): EntryForm {
+  const next = formFromEntry(fresh);
+  const merged: Record<string, unknown> = { ...next };
+  for (const key of Object.keys(next) as (keyof EntryForm)[]) {
+    if (key === "id" || key === "version") continue;
+    if (current[key] !== baseline[key]) merged[key] = current[key];
+  }
+  return merged as unknown as EntryForm;
+}

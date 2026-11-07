@@ -10,15 +10,16 @@ import {
 } from "@shared/auth";
 import { Hono } from "hono";
 import type { ZodType } from "zod";
-import { authRateLimit, requireSession } from "../auth/middleware";
+import { authRateLimit, clientIp, requireSession } from "../auth/middleware";
 import {
+  checkCurrentKey,
   clearLoginFailures,
   computeVerifier,
   fakeSalt,
   keyMatches,
-  loginDelayMs,
   readAttempts,
   recordLoginFailure,
+  waitLoginDelay,
 } from "../auth/password";
 import { clearSessionCookie, createSession, deleteSession } from "../auth/session";
 import type { AppEnv } from "../lib/env";
@@ -45,14 +46,6 @@ const json = <T extends ZodType>(schema: T) =>
 
 /** Compared against when the email is unknown, so a miss costs the same work as a hit. */
 const NO_USER_VERIFIER = "0".repeat(64);
-
-function clientIp(header: string | undefined) {
-  return header ?? "unknown";
-}
-
-async function wait(ms: number) {
-  if (ms > 0) await scheduler.wait(ms);
-}
 
 async function householdParams(db: D1Database) {
   const row = await db
@@ -87,10 +80,10 @@ export const authRoutes = new Hono<AppEnv>()
   .post("/login", authRateLimit, json(loginRequestSchema), async (c) => {
     const { email, key } = c.req.valid("json");
     const db = c.env.DB;
-    const ip = clientIp(c.req.header("cf-connecting-ip"));
+    const ip = clientIp(c);
     const attempts = await readAttempts(db, email, ip, nowIso());
     if (attempts.pairLocked) return jsonError(c, 429, "locked_out");
-    await wait(loginDelayMs(attempts.emailFailures));
+    await waitLoginDelay(attempts.emailFailures);
 
     const user = await findUserByEmail(db, email);
     const ok = await keyMatches(c.env.AUTH_SECRET, key, user?.verifier ?? NO_USER_VERIFIER);
@@ -131,9 +124,9 @@ export const authRoutes = new Hono<AppEnv>()
     const db = c.env.DB;
     const { id, tokenHash } = c.var.user;
     const user = await findUserById(db, id);
-    if (!user || !(await keyMatches(c.env.AUTH_SECRET, currentKey, user.verifier))) {
-      return jsonError(c, 401, "invalid_credentials");
-    }
+    const check = await checkCurrentKey(db, c.env.AUTH_SECRET, user, currentKey, clientIp(c));
+    if (check === "locked") return jsonError(c, 429, "locked_out");
+    if (check === "invalid") return jsonError(c, 401, "invalid_credentials");
     const now = nowIso();
     await db.batch([
       db
@@ -151,9 +144,9 @@ export const authRoutes = new Hono<AppEnv>()
     const { currentKey, partnerNewSalt, partnerNewKey } = c.req.valid("json");
     const db = c.env.DB;
     const actor = await findUserById(db, c.var.user.id);
-    if (!actor || !(await keyMatches(c.env.AUTH_SECRET, currentKey, actor.verifier))) {
-      return jsonError(c, 401, "invalid_credentials");
-    }
+    const check = await checkCurrentKey(db, c.env.AUTH_SECRET, actor, currentKey, clientIp(c));
+    if (check === "locked") return jsonError(c, 429, "locked_out");
+    if (check === "invalid" || !actor) return jsonError(c, 401, "invalid_credentials");
     const partner = await db
       .prepare("SELECT id FROM users WHERE id <> ?")
       .bind(actor.id)

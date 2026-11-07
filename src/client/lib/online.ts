@@ -3,8 +3,52 @@ import { useSyncExternalStore } from "react";
 let fetchFailed = false;
 const listeners = new Set<() => void>();
 
+const PROBE_FIRST_MS = 2000;
+const PROBE_MAX_MS = 30_000;
+let probeTimer: ReturnType<typeof setTimeout> | undefined;
+let probeDelay = PROBE_FIRST_MS;
+
 function emit() {
   for (const listener of listeners) listener();
+  syncProbe();
+}
+
+function stopProbe() {
+  clearTimeout(probeTimer);
+  probeTimer = undefined;
+  probeDelay = PROBE_FIRST_MS;
+}
+
+/** While a request has failed and someone is watching, keep asking the server whether it's back. */
+function syncProbe() {
+  if (!fetchFailed || listeners.size === 0) stopProbe();
+  else if (probeTimer === undefined) scheduleProbe();
+}
+
+function scheduleProbe() {
+  probeTimer = setTimeout(async () => {
+    const ok = await probeServer();
+    probeTimer = undefined;
+    if (!ok) {
+      probeDelay = Math.min(probeDelay * 2, PROBE_MAX_MS);
+      syncProbe();
+    }
+  }, probeDelay);
+}
+
+/**
+ * Asks the server whether it is reachable, marking the app online when it answers. Uses plain fetch so a
+ * failure doesn't loop back through the API client's offline tracking.
+ */
+export async function probeServer(): Promise<boolean> {
+  try {
+    const res = await fetch("/api/health", { cache: "no-store" });
+    if (!res.ok) return false;
+    markOnline();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function browserOnline(): boolean {
@@ -27,12 +71,14 @@ function subscribe(listener: () => void) {
     window.addEventListener("online", onBrowserChange);
     window.addEventListener("offline", onBrowserChange);
   }
+  syncProbe();
   return () => {
     listeners.delete(listener);
     if (listeners.size === 0) {
       window.removeEventListener("online", onBrowserChange);
       window.removeEventListener("offline", onBrowserChange);
     }
+    syncProbe();
   };
 }
 
@@ -57,5 +103,6 @@ export function useOnline(): boolean {
 
 export function resetOnlineForTests(): void {
   fetchFailed = false;
+  stopProbe();
   emit();
 }

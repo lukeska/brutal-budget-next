@@ -13,6 +13,17 @@ const refId = z.string().min(1).max(64);
 const amountMinor = z.number().int().positive().max(MAX_ABS_MINOR);
 const notes = z.string().max(NOTES_MAX).nullish();
 
+/**
+ * Sent by Undo when it re-creates a deleted entry: references archived since are accepted (as on an
+ * edit), and an imported entry gets its fingerprint and batch back.
+ */
+const restore = z
+  .object({
+    fingerprint: z.string().min(1).max(128).nullish(),
+    importBatchId: refId.nullish(),
+  })
+  .optional();
+
 const common = {
   id: z.uuidv7(),
   date: isoDate,
@@ -20,6 +31,7 @@ const common = {
   /** Which partner the entry belongs to; defaults to the signed-in partner. */
   userId: refId.optional(),
   notes,
+  restore,
 };
 
 const categorised = {
@@ -105,6 +117,8 @@ export const entrySchema = z.object({
   categoryId: z.string().nullable(),
   projectId: z.string().nullable(),
   notes: z.string().nullable(),
+  /** Duplicate-detection key of an imported entry; null for entries made in the app. */
+  fingerprint: z.string().nullable(),
   importBatchId: z.string().nullable(),
   version: z.number(),
   createdAt: z.string(),

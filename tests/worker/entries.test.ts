@@ -507,6 +507,28 @@ describe("deleting entries", () => {
       amountMinor: 1250,
     });
   });
+
+  it("restores a deleted entry whose category and project were archived since", async () => {
+    const body = expense({ projectId: PROJECT });
+    const entry = await create(body);
+    expect((await del(`/entries/${entry.id}?version=1`)).status).toBe(204);
+    await db.batch([
+      db.prepare("UPDATE categories SET archived_at = ?1 WHERE id = ?2").bind(NOW, GROCERIES),
+      db.prepare("UPDATE projects SET archived_at = ?1 WHERE id = ?2").bind(NOW, PROJECT),
+    ]);
+    const undo = await post("/entries", { ...body, restore: {} });
+    expect(undo.status, await undo.clone().text()).toBe(201);
+    expect(await undo.json()).toMatchObject({ id: entry.id, categoryId: GROCERIES, projectId: PROJECT });
+    // A replayed restore matches the stored row.
+    expect((await post("/entries", { ...body, restore: {} })).status).toBe(200);
+  });
+
+  it("still checks a restore's references exist and fit", async () => {
+    const res = await post("/entries", { ...expense({ categoryId: SALARY }), restore: {} });
+    expect(res.status).toBe(422);
+    const missing = await post("/entries", { ...expense({ projectId: "proj-missing" }), restore: {} });
+    expect(missing.status).toBe(422);
+  });
 });
 
 describe("listing entries", () => {

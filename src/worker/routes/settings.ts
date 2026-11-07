@@ -6,7 +6,8 @@ import {
   type ThemeChoice,
 } from "@shared/schemas/settings";
 import { Hono } from "hono";
-import { keyMatches } from "../auth/password";
+import { clientIp } from "../auth/middleware";
+import { checkCurrentKey } from "../auth/password";
 import { readHouseholdRow } from "../db/household";
 import type { AppEnv } from "../lib/env";
 import { jsonError } from "../lib/errors";
@@ -104,10 +105,15 @@ export const settingsRoutes = new Hono<AppEnv>()
     const { currentKey, email } = c.req.valid("json");
     const db = c.env.DB;
     const id = c.var.user.id;
-    const user = await findUser(db, id);
-    if (!user || !(await keyMatches(c.env.AUTH_SECRET, currentKey, user.verifier))) {
-      return jsonError(c, 401, "invalid_credentials");
-    }
+    const check = await checkCurrentKey(
+      db,
+      c.env.AUTH_SECRET,
+      await findUser(db, id),
+      currentKey,
+      clientIp(c),
+    );
+    if (check === "locked") return jsonError(c, 429, "locked_out");
+    if (check === "invalid") return jsonError(c, 401, "invalid_credentials");
     // `email` is a NOCASE column, so the clash check is case-insensitive and races nothing.
     const result = await db
       .prepare(

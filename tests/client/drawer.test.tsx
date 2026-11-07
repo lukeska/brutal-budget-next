@@ -12,7 +12,7 @@ import { resetOnlineForTests } from "@client/lib/online";
 import type { CurrencyCode } from "@shared/money";
 import { CONFLICT_MESSAGE, type Entry } from "@shared/schemas/entry";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -79,6 +79,7 @@ const SAVED: Entry = {
   categoryId: "c3",
   projectId: null,
   notes: null,
+  fingerprint: null,
   importBatchId: null,
   version: 3,
   createdAt: "2026-11-05T10:00:00Z",
@@ -331,6 +332,83 @@ describe("entry drawer", () => {
       ),
     );
     expect(amount).toHaveValue("99");
+  });
+
+  it("on reload keeps the partner's own edits but takes the other partner's changes to untouched fields", async () => {
+    const user = userEvent.setup();
+    let patches = 0;
+    const changed: Entry = { ...SAVED, version: 4, categoryId: "c4" };
+    mockApi({
+      [`PATCH /api/entries/${SAVED.id}`]: () => {
+        patches += 1;
+        return patches === 1
+          ? json({ error: "conflict", message: CONFLICT_MESSAGE, current: changed }, 409)
+          : json({ ...changed, version: 5, amountMinor: 9900 });
+      },
+    });
+    const amount = await openSaved();
+    // The other partner moves it to "Fun" while this drawer is open.
+    routes.set(`GET /api/entries/${SAVED.id}`, () => json(changed));
+    await user.clear(amount);
+    await user.type(amount, "99");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByText(CONFLICT_MESSAGE)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(screen.queryByText(CONFLICT_MESSAGE)).toBeNull());
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(calls.filter((c) => c.method === "PATCH")).toHaveLength(2));
+    expect(calls.filter((c) => c.method === "PATCH")[1]?.body).toMatchObject({
+      version: 4,
+      amountMinor: 9900,
+      categoryId: "c4",
+    });
+  });
+
+  it("waits for the rate of a newly picked date before saving a prefilled account amount", async () => {
+    const user = userEvent.setup();
+    let releaseRates: (r: Response) => void = () => {};
+    mockApi({
+      "GET /api/rates?date=2026-11-06": () =>
+        new Promise<Response>((resolve) => {
+          releaseRates = resolve;
+        }),
+      "POST /api/entries": () => json(SAVED, 201),
+    });
+    const amount = await openNew();
+    await user.type(amount, "3000");
+    await user.selectOptions(screen.getByLabelText("Amount currency"), "JPY");
+    const booked = await screen.findByLabelText("Amount on Card (EUR)");
+    await waitFor(() => expect(booked).toHaveValue("18.75"));
+    await user.click(screen.getAllByRole("button", { name: "Transport" })[0] as HTMLElement);
+
+    // Picking yesterday starts a fresh rates fetch; the old day's conversion must not be saved meanwhile.
+    fireEvent.change(screen.getByLabelText("Date"), { target: { value: "2026-11-06" } });
+    const save = screen.getByRole("button", { name: "Save" });
+    await waitFor(() => expect(save).toBeDisabled());
+    await user.click(save);
+    expect(posts()).toHaveLength(0);
+
+    // 150 yen per euro on the 6th.
+    act(() =>
+      releaseRates(
+        json({
+          status: "ok",
+          days: [
+            {
+              date: "2026-11-06",
+              rates: { JPY: { rateScaled: 1_500_000_000_000, sourceDate: "2026-11-06" } },
+            },
+          ],
+        }),
+      ),
+    );
+    await waitFor(() => expect(booked).toHaveValue("20.00"));
+    expect(save).toBeEnabled();
+    await user.click(save);
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0]?.body).toMatchObject({ date: "2026-11-06", accountAmountMinor: 2000 });
   });
 
   it("keeps the drawer open after a network failure, and Retry resends the same id", async () => {

@@ -1,4 +1,5 @@
 import { MIN_SECRET_LENGTH } from "@shared/auth";
+import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import type { AppEnv } from "../lib/env";
 import { jsonError } from "../lib/errors";
@@ -20,10 +21,12 @@ export const csrfGuard = createMiddleware<AppEnv>(async (c, next) => {
   return next();
 });
 
-/** Per-IP limit on login and setup, checked before any database access. */
+/** The client's IP as Cloudflare reports it. */
+export const clientIp = (c: Context) => c.req.header("cf-connecting-ip") ?? "unknown";
+
+/** Per-IP limit on login, setup and current-key checks, checked before any database access. */
 export const authRateLimit = createMiddleware<AppEnv>(async (c, next) => {
-  const ip = c.req.header("cf-connecting-ip") ?? "unknown";
-  const { success } = await c.env.AUTH_RATE_LIMITER.limit({ key: ip });
+  const { success } = await c.env.AUTH_RATE_LIMITER.limit({ key: clientIp(c) });
   if (!success) return jsonError(c, 429, "rate_limited");
   return next();
 });

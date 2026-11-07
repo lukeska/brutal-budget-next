@@ -33,6 +33,8 @@ export function createApp() {
   app.use("/setup/*", requireStrongSecrets);
   // Only setup attempts share the login rate limit; the status check runs on every page load.
   app.on("POST", ["/setup", "/setup/*"], authRateLimit);
+  // Current-key checks are password guesses too, so they share the limit (and the login lockout).
+  app.on("POST", ["/auth/password", "/auth/password/reset-partner", "/settings/email"], authRateLimit);
   app.route("/auth", authRoutes);
   app.route("/", setupRoutes);
 

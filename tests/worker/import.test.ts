@@ -7,6 +7,7 @@ import type {
   ImportRowsResponse,
   ImportUndoPreview,
 } from "@shared/schemas/csv";
+import type { Entry } from "@shared/schemas/entry";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { csrfGuard, requireSession } from "../../src/worker/auth/middleware";
@@ -14,6 +15,7 @@ import { addDays, eachDay } from "../../src/worker/fx/today";
 import { sha256Hex } from "../../src/worker/lib/crypto";
 import type { AppEnv } from "../../src/worker/lib/env";
 import { HttpError } from "../../src/worker/lib/errors";
+import { entriesRoutes } from "../../src/worker/routes/entries";
 import { importRoutes } from "../../src/worker/routes/import";
 import { ratesRoutes } from "../../src/worker/routes/rates";
 
@@ -38,6 +40,9 @@ function makeApp() {
   app.use("/import", requireSession);
   app.use("/import/*", requireSession);
   app.route("/", importRoutes);
+  app.use("/entries", requireSession);
+  app.use("/entries/*", requireSession);
+  app.route("/", entriesRoutes);
   app.notFound((c) => c.json({ error: "not_found" }, 404));
   app.onError((err, c) => {
     if (err instanceof HttpError) return c.json({ error: err.code, ...err.extra }, err.status);
@@ -160,6 +165,31 @@ async function seedRates(from: string, to: string, rates: Record<string, number>
       Object.entries(rates).map(([c, r]) => stmt.bind(d, c, Math.round(r * 1e10))),
     ),
   );
+}
+
+/** Reads the only entry through the API, then deletes it the way the month view does. */
+async function deleteOnlyEntry(): Promise<Entry> {
+  const only = await db.prepare("SELECT id FROM entries").first<{ id: string }>();
+  const entry = await json<Entry>(await call("GET", `/entries/${only?.id}`));
+  expect((await call("DELETE", `/entries/${entry.id}?version=${entry.version}`)).status).toBe(204);
+  return entry;
+}
+
+/** What the client's Undo posts (see restorePayload). */
+function restoreBody(entry: Entry) {
+  return {
+    id: entry.id,
+    kind: entry.kind,
+    date: entry.date,
+    accountId: entry.accountId,
+    userId: entry.userId,
+    notes: entry.notes,
+    amountMinor: entry.amountMinor,
+    currency: entry.currency,
+    categoryId: entry.categoryId,
+    projectId: entry.projectId,
+    restore: { fingerprint: entry.fingerprint, importBatchId: entry.importBatchId },
+  };
 }
 
 beforeEach(async () => {
@@ -307,6 +337,43 @@ describe("commit", () => {
     const res = await call("DELETE", `/import/batches/${batch.id}?confirm=1`);
     expect(res.status).toBe(204);
     expect(await countEntries()).toBe(0);
+  });
+
+  it("restores a deleted imported entry with its fingerprint and batch, so re-check and undo still see it", async () => {
+    const rows = [row()];
+    const batch = await createBatch(1);
+    await commit(batch.id, rows);
+    const entry = await deleteOnlyEntry();
+    expect(entry.fingerprint).toMatch(/^v1:/);
+    expect((await check(rows)).results[0]?.exists).toBe(false);
+
+    await json<Entry>(await call("POST", "/entries", restoreBody(entry)), 201);
+    const stored = await db
+      .prepare("SELECT fingerprint, import_batch_id FROM entries WHERE id = ?")
+      .bind(entry.id)
+      .first();
+    expect(stored).toEqual({ fingerprint: entry.fingerprint, import_batch_id: batch.id });
+    expect((await check(rows)).results[0]?.exists).toBe(true);
+    // A retried restore is an idempotent replay.
+    await json<Entry>(await call("POST", "/entries", restoreBody(entry)), 200);
+
+    expect((await call("DELETE", `/import/batches/${batch.id}?confirm=1`)).status).toBe(204);
+    expect(await countEntries()).toBe(0);
+  });
+
+  it("restores without the fingerprint or batch once a re-import or an undo took them", async () => {
+    const rows = [row()];
+    const batch = await createBatch(1);
+    await commit(batch.id, rows);
+    const entry = await deleteOnlyEntry();
+    // The file is imported again (taking the fingerprint) and the first batch is undone.
+    const again = await createBatch(1);
+    expect((await commit(again.id, rows)).inserted).toBe(1);
+    expect((await call("DELETE", `/import/batches/${batch.id}?confirm=1`)).status).toBe(204);
+
+    const restored = await json<Entry>(await call("POST", "/entries", restoreBody(entry)), 201);
+    expect(restored).toMatchObject({ id: entry.id, fingerprint: null, importBatchId: null });
+    expect(await countEntries()).toBe(2);
   });
 
   it("reports one skipped row when a retried chunk contains one row that already exists", async () => {

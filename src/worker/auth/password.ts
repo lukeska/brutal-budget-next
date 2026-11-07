@@ -1,6 +1,6 @@
 import { base64urlToBytes, bytesToBase64url, SALT_BYTES } from "@shared/auth";
 import { digestsEqual, hmacSha256, hmacSha256Hex } from "../lib/crypto";
-import { addMs } from "../lib/time";
+import { addMs, nowIso } from "../lib/time";
 
 /** The stored verifier for a browser-derived key: hex(HMAC-SHA256(AUTH_SECRET, "verifier" ‖ key)). */
 export function computeVerifier(secret: string, key: string): Promise<string> {
@@ -79,4 +79,32 @@ export async function clearLoginFailures(db: D1Database, email: string, ip: stri
     .prepare("DELETE FROM login_attempts WHERE key IN (?, ?)")
     .bind(pairKey(email, ip), emailKey(email))
     .run();
+}
+
+export async function waitLoginDelay(emailFailures: number) {
+  const ms = loginDelayMs(emailFailures);
+  if (ms > 0) await scheduler.wait(ms);
+}
+
+/**
+ * Checks a signed-in partner's current key (password change, partner reset, email change) with the
+ * same lockout as /login, so a borrowed session can't be used to guess the password.
+ */
+export async function checkCurrentKey(
+  db: D1Database,
+  secret: string,
+  user: { email: string; verifier: string } | null,
+  currentKey: string,
+  ip: string,
+): Promise<"ok" | "invalid" | "locked"> {
+  if (!user) return "invalid";
+  const attempts = await readAttempts(db, user.email, ip, nowIso());
+  if (attempts.pairLocked) return "locked";
+  await waitLoginDelay(attempts.emailFailures);
+  if (!(await keyMatches(secret, currentKey, user.verifier))) {
+    await recordLoginFailure(db, user.email, ip, nowIso());
+    return "invalid";
+  }
+  await clearLoginFailures(db, user.email, ip);
+  return "ok";
 }

@@ -21,6 +21,7 @@ import {
   formFromEntry,
   needsAccountAmount,
   needsToAmount,
+  rebaseForm,
   toEntryCreate,
   toEntryPatch,
 } from "./form";
@@ -55,12 +56,15 @@ function OpenEntryDrawer({ drawer }: { drawer: Extract<DrawerState, { open: true
 
   const [form, setForm] = useState<EntryForm | null>(null);
   const [dirty, setDirty] = useState(false);
+  /** The entry as the form was loaded from it: what tells the partner's own edits apart after a conflict. */
+  const [baseline, setBaseline] = useState<EntryForm | null>(null);
 
   // Start the form once its inputs are known: a saved draft wins over defaults or the loaded entry.
   const entry = entryQuery.data;
   const canStart = defaults.ready && (!editing || (entry !== undefined && entry.kind !== "adjustment"));
   useEffect(() => {
     if (form || !canStart) return;
+    if (editing && entry) setBaseline(formFromEntry(entry));
     const restored = draft.load();
     if (restored) {
       setForm(restored);
@@ -111,8 +115,11 @@ function OpenEntryDrawer({ drawer }: { drawer: Extract<DrawerState, { open: true
       }}
       onPrefill={setForm}
       onReload={async () => {
-        const fresh = await entryQuery.refetch();
-        return fresh.data;
+        const fresh = (await entryQuery.refetch()).data;
+        if (!fresh || fresh.kind === "adjustment") return;
+        setForm((current) => (current && baseline ? rebaseForm(current, baseline, fresh) : current));
+        setBaseline(formFromEntry(fresh));
+        setDirty(true);
       }}
       onSaved={() => {
         draft.clear();
@@ -136,7 +143,8 @@ type FormSheetProps = {
   onChange: (form: EntryForm) => void;
   /** Rate prefills change the form without making it a draft worth keeping. */
   onPrefill: (form: EntryForm) => void;
-  onReload: () => Promise<Entry | undefined>;
+  /** Loads the entry as it now is and rebases the form on it, keeping the partner's own edits. */
+  onReload: () => Promise<void>;
   onSaved: () => void;
   onDeleted: () => void;
   onCancel: () => void;
@@ -200,7 +208,6 @@ function EntryFormSheet({
   const showAccountAmount = needsAccountAmount(form, currencyOf);
   const showToAmount = needsToAmount(form, currencyOf);
   const pending = create.isPending || update.isPending;
-  const canSave = online && !pending;
 
   const accountPrefill = useConvertedPrefill({
     amountMinor: parsedMinor(form.amount, form.currency),
@@ -216,6 +223,12 @@ function EntryFormSheet({
     date: form.date,
     today: defaults.today,
   });
+
+  // A prefill still fetching its rate would save the previous conversion; a typed amount never waits.
+  const prefillLoading =
+    (showAccountAmount && !form.accountAmountTouched && accountPrefill.state === "loading") ||
+    (showToAmount && !form.toAmountTouched && toPrefill.state === "loading");
+  const canSave = online && !pending && !prefillLoading;
 
   usePrefillField(
     accountPrefill,
@@ -270,7 +283,7 @@ function EntryFormSheet({
 
   /** Saves the form. A retry skips the offline check: it is the partner's explicit "try the network again". */
   const submit = async (retry = false) => {
-    if (pending || (!online && !retry)) return;
+    if (pending || prefillLoading || (!online && !retry)) return;
     const request = buildRequest();
     if ("errors" in request) {
       setErrors(request.errors);
@@ -294,8 +307,7 @@ function EntryFormSheet({
   };
 
   const reload = async () => {
-    const fresh = await onReload();
-    if (fresh) onChange({ ...form, version: fresh.version });
+    await onReload();
     setProblem(null);
   };
 

@@ -57,7 +57,10 @@ export function useUpdateEntry() {
   });
 }
 
-/** The create payload that restores a deleted entry under its original id. */
+/**
+ * The create payload that restores a deleted entry under its original id. `restore` lets it keep
+ * references archived since, and an imported entry its fingerprint and batch.
+ */
 export function restorePayload(entry: Entry): EntryCreate {
   const base = {
     id: entry.id,
@@ -65,6 +68,7 @@ export function restorePayload(entry: Entry): EntryCreate {
     accountId: entry.accountId,
     userId: entry.userId,
     notes: entry.notes,
+    restore: { fingerprint: entry.fingerprint, importBatchId: entry.importBatchId },
   };
   if (entry.kind === "transfer") {
     return {

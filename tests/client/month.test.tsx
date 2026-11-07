@@ -37,6 +37,7 @@ function entry(over: Partial<MonthEntry>): MonthEntry {
     categoryId: "cat-groceries",
     projectId: null,
     notes: null,
+    fingerprint: null,
     importBatchId: null,
     version: 1,
     createdAt: "2026-11-05T10:00:00.000Z",

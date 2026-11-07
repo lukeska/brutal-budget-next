@@ -33,6 +33,7 @@ interface EntryRow {
   category_id: string | null;
   project_id: string | null;
   notes: string | null;
+  fingerprint: string | null;
   import_batch_id: string | null;
   version: number;
   created_at: string;
@@ -68,6 +69,7 @@ function toEntry(r: EntryRow): Entry {
     categoryId: r.category_id,
     projectId: r.project_id,
     notes: r.notes,
+    fingerprint: r.fingerprint,
     importBatchId: r.import_batch_id,
     version: r.version,
     createdAt: r.created_at,
@@ -356,6 +358,18 @@ function matchesExisting(draft: Draft, refs: Refs, existing: EntryRow): boolean 
 
 export type CreateResult = { status: 200 | 201; entry: Entry };
 
+type Restore = NonNullable<EntryCreate["restore"]>;
+
+/**
+ * A restore may drop the fingerprint or batch (taken or undone meanwhile), so a stored null matches
+ * too; a different stored value doesn't.
+ */
+function restoredMatches(restore: Restore, row: EntryRow): boolean {
+  const same = (stored: string | null, wanted: string | null | undefined) =>
+    stored === null || stored === (wanted ?? null);
+  return same(row.fingerprint, restore.fingerprint) && same(row.import_batch_id, restore.importBatchId);
+}
+
 /** SQL guard: account (?5) and optional to-account (?7) still have the validated currencies (?19, ?20). */
 const CURRENCIES_UNCHANGED = `(SELECT currency FROM accounts WHERE id = ?5) = ?19
          AND (?7 IS NULL OR (SELECT currency FROM accounts WHERE id = ?7) = ?20)`;
@@ -368,7 +382,10 @@ const ACCOUNT_CURRENCY_CHANGED = new HttpError(409, "account_currency_changed", 
 
 /**
  * Creates an entry under the client's id. Posting the same payload again returns the stored row;
- * a different payload under an existing id is a conflict. Undoing a delete posts the old id again.
+ * a different payload under an existing id is a conflict. Undoing a delete posts the old id again
+ * with `restore`: references archived since are accepted (existence, type and currency still are
+ * checked), and an imported entry gets back its fingerprint (unless another row holds it now) and
+ * its batch (unless that import was undone).
  */
 export async function createEntry(
   d1: D1Database,
@@ -378,8 +395,9 @@ export async function createEntry(
   const draft = draftFromCreate(input, sessionUserId);
   const [refs, existing] = await Promise.all([loadRefs(d1, refsWanted(draft)), readRow(d1, input.id)]);
 
+  const { restore } = input;
   const replay = (row: EntryRow): CreateResult => {
-    if (!matchesExisting(draft, refs, row)) {
+    if (!matchesExisting(draft, refs, row) || (restore && !restoredMatches(restore, row))) {
       throw new HttpError(409, "id_conflict", { message: "An entry with this id already exists" });
     }
     return { status: 200, entry: toEntry(row) };
@@ -389,18 +407,23 @@ export async function createEntry(
   const values = resolve(
     draft,
     refs,
-    new Set<Target>(["accountId", "toAccountId", "categoryId", "projectId"]),
+    restore ? new Set() : new Set<Target>(["accountId", "toAccountId", "categoryId", "projectId"]),
   );
   const value = await baseValueFor(d1, values, refs);
   const now = nowIso();
   // The insert only lands while the accounts still have the currencies the amounts were validated
-  // against, so a concurrent currency change can't leave an entry in the wrong currency.
+  // against, so a concurrent currency change can't leave an entry in the wrong currency. A restored
+  // fingerprint is dropped when another row holds it (a re-import), so the unique index never fails,
+  // and the batch is dropped when that import was undone.
   const { meta } = await d1
     .prepare(
       `INSERT INTO entries (id, kind, date, user_id, account_id, account_amount_minor, to_account_id,
          to_amount_minor, orig_currency, orig_amount_minor, base_amount_minor, fx_state, rate_scaled,
-         rate_date, category_id, project_id, notes, version, created_at, updated_at)
-       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, 1, ?18, ?18
+         rate_date, category_id, project_id, notes, fingerprint, import_batch_id, version, created_at,
+         updated_at)
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+         CASE WHEN NOT EXISTS (SELECT 1 FROM entries WHERE fingerprint = ?21) THEN ?21 END,
+         (SELECT id FROM import_batches WHERE id = ?22), 1, ?18, ?18
        WHERE ${CURRENCIES_UNCHANGED}
        ON CONFLICT (id) DO NOTHING`,
     )
@@ -425,6 +448,8 @@ export async function createEntry(
       now,
       refs.accounts.get(values.accountId)?.currency ?? null,
       values.toAccountId ? (refs.accounts.get(values.toAccountId)?.currency ?? null) : null,
+      restore?.fingerprint ?? null,
+      restore?.importBatchId ?? null,
     )
     .run();
 

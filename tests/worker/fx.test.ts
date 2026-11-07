@@ -350,6 +350,33 @@ describe("entry base values", () => {
     expect(row.version).toBe(2);
   });
 
+  it("gives up on a stalled provider after a timeout and saves the entry as waiting", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    // The provider accepts the request and never answers; only an abort ends it.
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      (_input, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+        }),
+    );
+    // Stand in for the timer so the test needn't wait: fire the request's timeout by hand.
+    const timer = new AbortController();
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timer.signal);
+
+    const saving = saveEntry("e1", "2026-11-06", "usd", 10_000, "2026-11-06");
+    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    expect(timeout).toHaveBeenCalledWith(5_000);
+    expect(fetchSpy.mock.calls[0]?.[1]?.signal).toBe(timer.signal);
+    timer.abort(new DOMException("The operation timed out.", "TimeoutError"));
+
+    expect(await saving).toEqual({
+      baseAmountMinor: null,
+      fxState: "waiting",
+      rateScaled: null,
+      rateDate: null,
+    });
+  });
+
   it("keeps a fixed entry's base value when newer rates arrive", async () => {
     const provider = fakeFrankfurter({ "2026-03-10": day({ USD: 1.25 }) });
     await runFxCron(db, at("2026-03-10T16:00:00Z"));

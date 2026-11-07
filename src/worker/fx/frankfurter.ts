@@ -15,6 +15,9 @@ export interface PublishedRate {
   rateScaled: number;
 }
 
+/** A stalled provider must not hold an entry save or import open; a timeout fails like a 5xx. */
+const REQUEST_TIMEOUT_MS = 5_000;
+
 export type ProviderResult = { ok: true; rates: PublishedRate[] } | { ok: false; reason: string };
 
 export function fetchRatesOn(date: string): Promise<ProviderResult> {
@@ -38,7 +41,10 @@ async function request(params: Record<string, string>): Promise<ProviderResult> 
 
   let body: unknown;
   try {
-    const res = await fetch(url, { headers: { accept: "application/json" } });
+    const res = await fetch(url, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
     if (!res.ok) return fail(`Frankfurter responded ${res.status}`);
     body = await res.json();
   } catch (err) {
