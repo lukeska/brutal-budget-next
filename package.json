@@ -1,0 +1,88 @@
+{
+  "name": "brutal-budget-next",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Self-hosted expense and income tracker for couples, running entirely on Cloudflare.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "npm run build && vite preview",
+    "deploy": "npm run db:migrate:remote && wrangler deploy",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:remote": "wrangler d1 migrations apply DB --remote",
+    "cf-typegen": "wrangler types src/worker/worker-configuration.d.ts",
+    "typecheck": "tsc -b --noEmit",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "test": "vitest run",
+    "test:e2e": "playwright test"
+  },
+  "cloudflare": {
+    "bindings": {
+      "AUTH_SECRET": {
+        "description": "A random string of at least 32 characters used to protect stored logins. Keep a copy somewhere safe (for example a password manager), separate from your backups. Generate one with `openssl rand -base64 48`."
+      },
+      "SETUP_TOKEN": {
+        "description": "A random string of at least 32 characters. You type it once on the first-run setup screen to prove you own this deployment. Generate one with `openssl rand -base64 32`."
+      },
+      "DB": {
+        "description": "The D1 database that stores your household data. Pick a location close to where you live."
+      }
+    }
+  },
+  "dependencies": {
+    "@hono/zod-validator": "^0.9.1",
+    "@tabler/icons-react": "^3.50.0",
+    "@tanstack/react-query": "^5.107.1",
+    "@tanstack/react-router": "^1.170.46",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "drizzle-orm": "^0.45.4",
+    "hash-wasm": "^4.12.0",
+    "hono": "^4.13.17",
+    "papaparse": "^5.7.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "recharts": "^3.10.1",
+    "tailwind-merge": "^3.7.0",
+    "uuid": "^14.0.3",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.6",
+    "@cloudflare/vite-plugin": "^1.67.0",
+    "@cloudflare/vitest-plugin": "^1.6.0",
+    "@playwright/test": "^1.65.0",
+    "@tailwindcss/vite": "^4.3.5",
+    "@tanstack/router-plugin": "^1.168.48",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.8",
+    "@types/node": "^26.6.6",
+    "@types/papaparse": "^5.5.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.2.1",
+    "drizzle-kit": "^0.31.11",
+    "jsdom": "^31.0.0",
+    "tailwindcss": "^4.3.5",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.6",
+    "vite-plugin-pwa": "^2.0.0",
+    "vitest": "^4.1.12",
+    "workbox-build": "^7.4.1",
+    "workbox-window": "^7.4.1",
+    "wrangler": "^4.158.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "esbuild@0.18.20": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.1": true,
+    "workerd@1.20260815.1": true,
+    "workerd@1.20261101.1": true,
+    "workerd@1.20261104.1": true
+  }
+}

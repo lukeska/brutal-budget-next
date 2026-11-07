@@ -1,0 +1,5 @@
+# Secrets the app needs. The Deploy to Cloudflare button prompts for each key listed here.
+# Both must be random strings of at least 32 characters; the empty values below are rejected on purpose.
+# Generate with: openssl rand -base64 48
+AUTH_SECRET=
+SETUP_TOKEN=
