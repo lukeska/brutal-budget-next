@@ -7,6 +7,7 @@ import { entriesRoutes } from "./routes/entries";
 import { ratesRoutes } from "./routes/rates";
 import { settingsRoutes } from "./routes/settings";
 import { setupRoutes } from "./routes/setup";
+import { statsRoutes } from "./routes/stats";
 
 export type { AppEnv } from "./lib/env";
 
@@ -38,6 +39,9 @@ export function createApp() {
   app.use("/settings", requireSession);
   app.use("/settings/*", requireSession);
   app.route("/", settingsRoutes);
+  app.use("/stats", requireSession);
+  app.use("/stats/*", requireSession);
+  app.route("/", statsRoutes);
 
   app.notFound((c) => c.json({ error: "not_found" }, 404));
 
