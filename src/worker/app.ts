@@ -2,8 +2,11 @@ import { Hono } from "hono";
 import { authRateLimit, csrfGuard, requireSession, requireStrongSecrets } from "./auth/middleware";
 import type { AppEnv } from "./lib/env";
 import { HttpError } from "./lib/errors";
+import { accountsRoutes } from "./routes/accounts";
 import { authRoutes } from "./routes/auth";
+import { categoriesRoutes } from "./routes/categories";
 import { entriesRoutes } from "./routes/entries";
+import { projectsRoutes } from "./routes/projects";
 import { ratesRoutes } from "./routes/rates";
 import { settingsRoutes } from "./routes/settings";
 import { setupRoutes } from "./routes/setup";
@@ -42,6 +45,16 @@ export function createApp() {
   app.use("/stats", requireSession);
   app.use("/stats/*", requireSession);
   app.route("/", statsRoutes);
+  app.use("/accounts", requireSession);
+  app.use("/accounts/*", requireSession);
+  app.use("/reconciliations/*", requireSession);
+  app.route("/", accountsRoutes);
+  app.use("/categories", requireSession);
+  app.use("/categories/*", requireSession);
+  app.route("/", categoriesRoutes);
+  app.use("/projects", requireSession);
+  app.use("/projects/*", requireSession);
+  app.route("/", projectsRoutes);
 
   app.notFound((c) => c.json({ error: "not_found" }, 404));
 

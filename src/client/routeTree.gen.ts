@@ -13,8 +13,11 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as AccountsIndexRouteImport } from './routes/accounts/index'
+import { Route as AccountsAccountIdRouteImport } from './routes/accounts/$accountId'
 import { Route as CategoriesIndexRouteImport } from './routes/categories/index'
+import { Route as CategoriesCategoryIdRouteImport } from './routes/categories/$categoryId'
 import { Route as ProjectsIndexRouteImport } from './routes/projects/index'
+import { Route as ProjectsProjectIdRouteImport } from './routes/projects/$projectId'
 import { Route as SettingsIndexRouteImport } from './routes/settings/index'
 import { Route as StatisticsIndexRouteImport } from './routes/statistics/index'
 
@@ -38,14 +41,29 @@ const AccountsIndexRoute = AccountsIndexRouteImport.update({
   path: '/accounts/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AccountsAccountIdRoute = AccountsAccountIdRouteImport.update({
+  id: '/accounts/$accountId',
+  path: '/accounts/$accountId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CategoriesIndexRoute = CategoriesIndexRouteImport.update({
   id: '/categories/',
   path: '/categories/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const CategoriesCategoryIdRoute = CategoriesCategoryIdRouteImport.update({
+  id: '/categories/$categoryId',
+  path: '/categories/$categoryId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProjectsIndexRoute = ProjectsIndexRouteImport.update({
   id: '/projects/',
   path: '/projects/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProjectsProjectIdRoute = ProjectsProjectIdRouteImport.update({
+  id: '/projects/$projectId',
+  path: '/projects/$projectId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsIndexRoute = SettingsIndexRouteImport.update({
@@ -63,6 +81,9 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/setup': typeof SetupRoute
+  '/accounts/$accountId': typeof AccountsAccountIdRoute
+  '/categories/$categoryId': typeof CategoriesCategoryIdRoute
+  '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/accounts/': typeof AccountsIndexRoute
   '/categories/': typeof CategoriesIndexRoute
   '/projects/': typeof ProjectsIndexRoute
@@ -73,6 +94,9 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/setup': typeof SetupRoute
+  '/accounts/$accountId': typeof AccountsAccountIdRoute
+  '/categories/$categoryId': typeof CategoriesCategoryIdRoute
+  '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/accounts': typeof AccountsIndexRoute
   '/categories': typeof CategoriesIndexRoute
   '/projects': typeof ProjectsIndexRoute
@@ -84,6 +108,9 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
   '/setup': typeof SetupRoute
+  '/accounts/$accountId': typeof AccountsAccountIdRoute
+  '/categories/$categoryId': typeof CategoriesCategoryIdRoute
+  '/projects/$projectId': typeof ProjectsProjectIdRoute
   '/accounts/': typeof AccountsIndexRoute
   '/categories/': typeof CategoriesIndexRoute
   '/projects/': typeof ProjectsIndexRoute
@@ -96,6 +123,9 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/setup'
+    | '/accounts/$accountId'
+    | '/categories/$categoryId'
+    | '/projects/$projectId'
     | '/accounts/'
     | '/categories/'
     | '/projects/'
@@ -106,6 +136,9 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/setup'
+    | '/accounts/$accountId'
+    | '/categories/$categoryId'
+    | '/projects/$projectId'
     | '/accounts'
     | '/categories'
     | '/projects'
@@ -116,6 +149,9 @@ export interface FileRouteTypes {
     | '/'
     | '/login'
     | '/setup'
+    | '/accounts/$accountId'
+    | '/categories/$categoryId'
+    | '/projects/$projectId'
     | '/accounts/'
     | '/categories/'
     | '/projects/'
@@ -127,6 +163,9 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
   SetupRoute: typeof SetupRoute
+  AccountsAccountIdRoute: typeof AccountsAccountIdRoute
+  CategoriesCategoryIdRoute: typeof CategoriesCategoryIdRoute
+  ProjectsProjectIdRoute: typeof ProjectsProjectIdRoute
   AccountsIndexRoute: typeof AccountsIndexRoute
   CategoriesIndexRoute: typeof CategoriesIndexRoute
   ProjectsIndexRoute: typeof ProjectsIndexRoute
@@ -164,6 +203,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AccountsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/accounts/$accountId': {
+      id: '/accounts/$accountId'
+      path: '/accounts/$accountId'
+      fullPath: '/accounts/$accountId'
+      preLoaderRoute: typeof AccountsAccountIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/categories/': {
       id: '/categories/'
       path: '/categories'
@@ -171,11 +217,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof CategoriesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/categories/$categoryId': {
+      id: '/categories/$categoryId'
+      path: '/categories/$categoryId'
+      fullPath: '/categories/$categoryId'
+      preLoaderRoute: typeof CategoriesCategoryIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/projects/': {
       id: '/projects/'
       path: '/projects'
       fullPath: '/projects/'
       preLoaderRoute: typeof ProjectsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/projects/$projectId': {
+      id: '/projects/$projectId'
+      path: '/projects/$projectId'
+      fullPath: '/projects/$projectId'
+      preLoaderRoute: typeof ProjectsProjectIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings/': {
@@ -199,6 +259,9 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
   SetupRoute: SetupRoute,
+  AccountsAccountIdRoute: AccountsAccountIdRoute,
+  CategoriesCategoryIdRoute: CategoriesCategoryIdRoute,
+  ProjectsProjectIdRoute: ProjectsProjectIdRoute,
   AccountsIndexRoute: AccountsIndexRoute,
   CategoriesIndexRoute: CategoriesIndexRoute,
   ProjectsIndexRoute: ProjectsIndexRoute,
