@@ -198,7 +198,9 @@ function Wizard() {
         addDefaultCategories,
       };
       await api.post("/api/setup", body);
-      await queryClient.invalidateQueries({ queryKey: meQueryKey });
+      // "all": the login screen has no observer of this query, so the default "active" would leave a
+      // cached signed-out answer in place and the root gate would send the user straight back here.
+      await queryClient.invalidateQueries({ queryKey: meQueryKey, refetchType: "all" });
       queryClient.setQueryData<SetupStatus>(setupStatusKey, { needsSetup: false });
       await router.navigate({ to: "/" });
     } catch (err) {
