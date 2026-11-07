@@ -10,18 +10,14 @@ import { Page } from "../../components/ui/page";
 import { openEdit } from "../../drawer/store";
 import { useCategorySummary } from "../../features/categories/api";
 import { cn } from "../../lib/cn";
+import { formatIsoDate } from "../../lib/date";
 
 export const Route = createFileRoute("/categories/$categoryId")({
   component: CategoryDetail,
 });
 
 function monthLabel(month: string, style: "short" | "long" = "short"): string {
-  const [y, m] = month.split("-").map(Number);
-  return new Date(Date.UTC(y ?? 2000, (m ?? 1) - 1, 1)).toLocaleDateString(undefined, {
-    month: style,
-    year: style === "long" ? "numeric" : "2-digit",
-    timeZone: "UTC",
-  });
+  return formatIsoDate(`${month}-01`, { month: style, year: style === "long" ? "numeric" : "2-digit" });
 }
 
 function CategoryDetail() {

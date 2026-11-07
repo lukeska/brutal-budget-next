@@ -18,21 +18,12 @@ import {
   useProjects,
   useUpdateProject,
 } from "../../features/projects/api";
-import { ApiError } from "../../lib/api";
+import { errorMessage } from "../../lib/api";
 import { cn } from "../../lib/cn";
 
 export const Route = createFileRoute("/projects/")({
   component: ProjectsPage,
 });
-
-function errorMessage(err: unknown): string {
-  if (err instanceof ApiError) {
-    const body = err.body as { message?: string; issues?: { message: string }[] } | null;
-    if (body?.issues?.[0]) return body.issues[0].message;
-    if (body?.message) return body.message;
-  }
-  return "Something went wrong — try again";
-}
 
 function ProjectsPage() {
   const { data: projects, isPending, isError } = useProjects();

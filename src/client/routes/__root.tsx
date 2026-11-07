@@ -14,7 +14,7 @@ import { TopBar } from "../components/layout/TopBar";
 import { OfflineBanner } from "../components/OfflineBanner";
 import { Toaster } from "../components/ui/toast";
 import { DrawerHost, openCreate } from "../drawer/store";
-import { meQueryKey } from "../features/auth/use-me";
+import { meQueryKey, meQueryOptions } from "../features/auth/use-me";
 import { ApiError, api, loginHref, setUnauthorizedHandler } from "../lib/api";
 import { useIsDesktop } from "../lib/media";
 import { initTheme } from "../lib/theme";
@@ -29,19 +29,6 @@ const setupStatusQuery = {
   queryFn: () => api.get<SetupStatus>("/api/setup/status"),
   // Setup happens once; after it, the answer never changes for this page load.
   staleTime: Number.POSITIVE_INFINITY,
-};
-
-/** Same key and result as `useMe()`, so the gate and the screens share one cache entry. */
-const meQuery = {
-  queryKey: meQueryKey,
-  queryFn: async (): Promise<MeResponse | null> => {
-    try {
-      return await api.get<MeResponse>("/api/auth/me");
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 401) return null;
-      throw err;
-    }
-  },
 };
 
 initTheme();
@@ -66,7 +53,9 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     }
     if (PUBLIC_PATHS.has(path)) return;
 
-    const me: MeResponse | null | undefined = await loadOrOffline(() => queryClient.ensureQueryData(meQuery));
+    const me: MeResponse | null | undefined = await loadOrOffline(() =>
+      queryClient.ensureQueryData(meQueryOptions),
+    );
     if (me === null) throw redirect({ href: loginHref(location.href) });
     if (me?.mustChangePassword && path !== "/settings") {
       throw redirect({ href: "/settings?force-password=1" });
@@ -84,7 +73,7 @@ function RootLayout() {
 
   useEffect(() => {
     setUnauthorizedHandler((href) => {
-      queryClient.setQueryData(meQuery.queryKey, null);
+      queryClient.setQueryData(meQueryKey, null);
       void router.navigate({ href });
     });
   }, [router, queryClient]);

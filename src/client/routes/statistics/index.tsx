@@ -42,13 +42,20 @@ const MONTH_NAMES = Array.from({ length: 12 }, (_, i) =>
 const AXIS = { stroke: "var(--color-rule)", tick: { fill: "var(--color-muted)", fontSize: 12 } } as const;
 
 /** Short axis label such as "€1.2K"; display only, so a float is fine here. */
+const compactFormatters = new Map<CurrencyCode, Intl.NumberFormat>();
+
 function compact(minor: number, currency: CurrencyCode): string {
-  return new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency,
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(minor / 10 ** exponentOf(currency));
+  let formatter = compactFormatters.get(currency);
+  if (!formatter) {
+    formatter = new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency,
+      notation: "compact",
+      maximumFractionDigits: 1,
+    });
+    compactFormatters.set(currency, formatter);
+  }
+  return formatter.format(minor / 10 ** exponentOf(currency));
 }
 
 function StatisticsPage() {

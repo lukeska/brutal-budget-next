@@ -1,16 +1,13 @@
-import { zValidator } from "@hono/zod-validator";
 import {
   entryCreateSchema,
   entryDeleteQuerySchema,
   entryListQuerySchema,
   entryPatchSchema,
-  type ValidationIssue,
 } from "@shared/schemas/entry";
-import type { Context } from "hono";
 import { Hono } from "hono";
-import type { z } from "zod";
 import type { AppEnv } from "../lib/env";
 import { HttpError } from "../lib/errors";
+import { validate } from "../lib/validate";
 import {
   createEntry,
   deleteEntry,
@@ -20,21 +17,7 @@ import {
   updateEntry,
 } from "../services/entries";
 
-type Target = "json" | "query";
-
-/** Validates a request part, answering 422 with field issues when it doesn't parse. */
-function validate<T extends z.ZodType>(target: Target, schema: T) {
-  return zValidator(target, schema, (result, c: Context) => {
-    if (result.success) return;
-    const issues: ValidationIssue[] = result.error.issues.map((i) => ({
-      path: i.path.map((p) => (typeof p === "number" ? p : String(p))),
-      message: i.message,
-    }));
-    return c.json({ error: "validation_failed", issues }, 422);
-  });
-}
-
-/** Expenses, income and transfers. Paths carry their own prefix; mount at "/". */
+/** Expenses, income and transfers. */
 export const entriesRoutes = new Hono<AppEnv>()
   .get("/entries", validate("query", entryListQuerySchema), async (c) => {
     return c.json(await listEntries(c.env.DB, c.req.valid("query")));

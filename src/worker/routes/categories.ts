@@ -1,5 +1,3 @@
-import { zValidator } from "@hono/zod-validator";
-import type { CurrencyCode } from "@shared/money";
 import {
   CATEGORY_TYPES,
   type Category,
@@ -13,57 +11,17 @@ import {
   categorySummaryQuerySchema,
   versionQuerySchema,
 } from "@shared/schemas/category";
-import { CONFLICT_MESSAGE, type Entry, type ValidationIssue } from "@shared/schemas/entry";
-import { type Context, Hono } from "hono";
+import { CONFLICT_MESSAGE, type Entry } from "@shared/schemas/entry";
+import { Hono } from "hono";
 import { z } from "zod";
-import { addDays, todayIn } from "../fx/today";
+import { HOUSEHOLD_SQL, type HouseholdRow, parseHousehold } from "../db/household";
+import { addDays, nextMonthStart, todayIn } from "../fx/today";
+import { isForeignKeyError, runDelete } from "../lib/delete";
 import type { AppEnv } from "../lib/env";
-import { HttpError } from "../lib/errors";
+import { HttpError, invalid } from "../lib/errors";
 import { nowIso } from "../lib/time";
-import { listEntries } from "../services/entries";
-
-type Target = "json" | "query";
-
-/** Validates a request part, answering 422 with field issues when it doesn't parse. */
-export function validate<T extends z.ZodType>(target: Target, schema: T) {
-  return zValidator(target, schema, (result, c: Context) => {
-    if (result.success) return;
-    const issues: ValidationIssue[] = result.error.issues.map((i) => ({
-      path: i.path.map((p) => (typeof p === "number" ? p : String(p))),
-      message: i.message,
-    }));
-    return c.json({ error: "validation_failed", issues }, 422);
-  });
-}
-
-export function invalid(path: string, message: string): HttpError {
-  return new HttpError(422, "validation_failed", { issues: [{ path: [path], message }] });
-}
-
-/** Runs a delete; a foreign-key failure means something still refers to the row. */
-export async function runDelete(stmt: D1PreparedStatement): Promise<number> {
-  try {
-    return (await stmt.run()).meta.changes;
-  } catch (err) {
-    if (isForeignKeyError(err))
-      throw new HttpError(409, "in_use", { message: "Still in use — archive it instead" });
-    throw err;
-  }
-}
-
-export function isForeignKeyError(err: unknown): boolean {
-  return err instanceof Error && /FOREIGN KEY constraint failed/i.test(err.message);
-}
-
-export async function household(d1: D1Database): Promise<{ baseCurrency: CurrencyCode; timezone: string }> {
-  const h = await d1
-    .prepare("SELECT base_currency, timezone FROM household WHERE id = 1")
-    .first<{ base_currency: CurrencyCode; timezone: string }>();
-  if (!h) throw new HttpError(409, "not_set_up");
-  return { baseCurrency: h.base_currency, timezone: h.timezone };
-}
-
-// ---------- rows ----------
+import { validate } from "../lib/validate";
+import { entriesStatement, toEntries } from "../services/entries";
 
 interface CategoryRow {
   id: string;
@@ -125,8 +83,6 @@ async function listTree(d1: D1Database, type?: CategoryType): Promise<CategoryNo
   return [...nodes.values()];
 }
 
-// ---------- summary ----------
-
 function previousMonth(month: string): string {
   return addDays(`${month}-01`, -1).slice(0, 7);
 }
@@ -143,13 +99,22 @@ async function categorySummary(
   id: string,
   query: z.infer<typeof categorySummaryQuerySchema>,
 ): Promise<CategorySummary> {
-  const tree = await listTree(d1);
-  const own = tree.flatMap((p) => [p, ...p.children]).find((c) => c.id === id);
+  const [rows, householdRows] = await d1.batch<unknown>([
+    d1
+      .prepare(`${SELECT_CATEGORY} WHERE c.id = ?1 OR c.parent_id = ?1 ORDER BY c.name COLLATE NOCASE, c.id`)
+      .bind(id),
+    d1.prepare(HOUSEHOLD_SQL),
+  ]);
+  const found = ((rows?.results ?? []) as CategoryRow[]).map(toCategory);
+  const own = found.find((c) => c.id === id);
   if (!own) throw new HttpError(404, "not_found");
-  const category: CategoryNode = tree.find((p) => p.id === id) ?? { ...own, children: [] };
+  const category: CategoryNode = {
+    ...own,
+    children: own.parentId === null ? found.filter((c) => c.parentId === id) : [],
+  };
   const ids = [category.id, ...category.children.map((c) => c.id)];
 
-  const { baseCurrency, timezone } = await household(d1);
+  const { baseCurrency, timezone } = parseHousehold(householdRows?.results[0] as HouseholdRow | undefined);
   const current = todayIn(timezone).slice(0, 7);
   const months = monthWindow(current, query.months);
   const month = query.month ?? current;
@@ -158,7 +123,7 @@ async function categorySummary(
   // Only entries of the category's own kind count, which leaves out transfers and adjustments;
   // entries still waiting for a rate have no base value yet.
   const filter = `category_id IN (SELECT value FROM json_each(?1)) AND kind = ?2 AND fx_state <> 'waiting'`;
-  const [monthly, split] = await d1.batch<{ key: string; total: number }>([
+  const [monthly, split, listed] = await d1.batch<unknown>([
     d1
       .prepare(
         `SELECT substr(date, 1, 7) AS key, SUM(base_amount_minor) AS total FROM entries
@@ -168,32 +133,34 @@ async function categorySummary(
     d1
       .prepare(
         `SELECT category_id AS key, SUM(base_amount_minor) AS total FROM entries
-         WHERE ${filter} AND date LIKE ?3 || '-%' GROUP BY key`,
+         WHERE ${filter} AND date >= ?3 AND date < ?4 GROUP BY key`,
       )
-      .bind(JSON.stringify(ids), category.type, month),
+      .bind(JSON.stringify(ids), category.type, `${month}-01`, nextMonthStart(month)),
+    entriesStatement(d1, { month, categoryIds: ids }),
   ]);
-  const totals = new Map((monthly?.results ?? []).map((r) => [r.key, r.total]));
-
-  const lists = await Promise.all(ids.map((categoryId) => listEntries(d1, { month, categoryId })));
-  const entries = lists.flat().sort(newestFirst);
+  const totals = new Map(
+    ((monthly?.results ?? []) as { key: string; total: number }[]).map((r) => [r.key, r.total]),
+  );
+  const entries = toEntries(listed?.results ?? []).sort(newestFirst);
 
   return {
     category,
     baseCurrency,
     months: months.map((m) => ({ month: m, totalMinor: totals.get(m) ?? 0 })),
     month,
-    breakdown: (split?.results ?? []).map((r) => ({ categoryId: r.key, totalMinor: r.total })),
+    breakdown: ((split?.results ?? []) as { key: string; total: number }[]).map((r) => ({
+      categoryId: r.key,
+      totalMinor: r.total,
+    })),
     entries,
   };
 }
 
-export function newestFirst(a: Entry, b: Entry): number {
+function newestFirst(a: Entry, b: Entry): number {
   if (a.date !== b.date) return a.date < b.date ? 1 : -1;
   if (a.createdAt !== b.createdAt) return a.createdAt < b.createdAt ? 1 : -1;
   return a.id < b.id ? 1 : -1;
 }
-
-// ---------- writes ----------
 
 async function createCategory(
   d1: D1Database,
@@ -336,11 +303,9 @@ async function mergeCategory(
   return { targetId, movedEntries: moved ?? 0, movedChildren: movedChildren ?? 0 };
 }
 
-// ---------- routes ----------
-
 const listQuerySchema = z.object({ type: z.enum(CATEGORY_TYPES).optional() });
 
-/** Two-level expense and income categories. Paths carry their own prefix; mount at "/". */
+/** Two-level expense and income categories. */
 export const categoriesRoutes = new Hono<AppEnv>()
   .get("/categories", validate("query", listQuerySchema), async (c) => {
     return c.json(await listTree(c.env.DB, c.req.valid("query").type));

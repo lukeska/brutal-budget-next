@@ -14,9 +14,11 @@ import { Segmented } from "../components/ui/segmented";
 import { openCreate } from "../drawer/store";
 import { useMe } from "../features/auth/use-me";
 import { type DisplayCurrency, useDisplayCurrency } from "../features/display-currency";
+import { useDeleteEntry } from "../features/entries/api";
 import { currentMonth, prefetchMonth, shiftMonth, useMonth } from "../features/month/api";
 import { useSettings } from "../features/settings/api";
 import { cn } from "../lib/cn";
+import { formatIsoDate } from "../lib/date";
 
 export const Route = createFileRoute("/")({
   component: MonthPage,
@@ -25,20 +27,11 @@ export const Route = createFileRoute("/")({
 const ALL = "all";
 
 function monthLabel(month: string): string {
-  return new Date(`${month}-01T00:00:00Z`).toLocaleDateString(undefined, {
-    month: "long",
-    year: "numeric",
-    timeZone: "UTC",
-  });
+  return formatIsoDate(`${month}-01`, { month: "long", year: "numeric" });
 }
 
 function dayLabel(date: string): string {
-  return new Date(`${date}T00:00:00Z`).toLocaleDateString(undefined, {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    timeZone: "UTC",
-  });
+  return formatIsoDate(date, { weekday: "short", day: "numeric", month: "short" });
 }
 
 /** Signed contribution to the household net, in the base currency; zero for anything not counted. */
@@ -167,6 +160,8 @@ function MonthBody({ data, display }: { data: MonthResponse; display: DisplayCur
   const days = useMemo(() => groupByDay(data.entries), [data.entries]);
   const expense = data.categories.filter((c) => c.type === "expense");
   const income = data.categories.filter((c) => c.type === "income");
+  // One mutation for the list; each row awaits its own delete so a failure restores only that row.
+  const remove = useDeleteEntry();
 
   return (
     <div className="flex flex-col gap-10">
@@ -221,7 +216,7 @@ function MonthBody({ data, display }: { data: MonthResponse; display: DisplayCur
                 </h3>
                 <ul>
                   {day.entries.map((entry) => (
-                    <EntryRow key={entry.id} entry={entry} />
+                    <EntryRow key={entry.id} entry={entry} onDelete={remove.mutateAsync} />
                   ))}
                 </ul>
               </div>

@@ -1,8 +1,9 @@
-import { zValidator } from "@hono/zod-validator";
 import type { StatsCategory, StatsMonth, StatsResponse } from "@shared/schemas/stats";
 import { statsYearSchema } from "@shared/schemas/stats";
 import { Hono } from "hono";
+import { LATEST_RATES_SQL, latestRatesBody, type StoredRate } from "../fx/rates";
 import type { AppEnv } from "../lib/env";
+import { validate } from "../lib/validate";
 
 /** Only expenses and income with a base value count; transfers, adjustments and waiting entries don't. */
 const COUNTED = "e.kind IN ('expense', 'income') AND e.fx_state <> 'waiting'";
@@ -18,18 +19,13 @@ type CategoryRow = {
   m: string;
   total: number;
 };
-type RateRow = { currency: string; rateScaled: number; sourceDate: string };
 
 const monthIndex = (m: string) => Number(m) - 1;
 
-/** Yearly statistics in one D1 batch. Paths carry their own prefix; mount at "/". */
+/** Yearly statistics in one D1 batch. */
 export const statsRoutes = new Hono<AppEnv>().get(
   "/stats/:year",
-  zValidator("param", statsYearSchema, (result, c) => {
-    if (result.success) return;
-    const issues = result.error.issues.map((i) => ({ path: i.path.map(String), message: i.message }));
-    return c.json({ error: "validation_failed", issues }, 422);
-  }),
+  validate("param", statsYearSchema),
   async (c) => {
     const year = Number(c.req.valid("param").year);
     const from = `${year}-01-01`;
@@ -63,11 +59,7 @@ export const statsRoutes = new Hono<AppEnv>().get(
            WHERE ${IN_YEAR} AND e.kind IN ('expense', 'income') AND e.fx_state = 'waiting'`,
         )
         .bind(from, to),
-      d1.prepare(
-        `SELECT f.currency, f.rate_scaled AS rateScaled, f.source_date AS sourceDate FROM fx_rates f
-         JOIN (SELECT currency, MAX(source_date) AS s FROM fx_rates GROUP BY currency) m
-           ON f.currency = m.currency AND f.date = m.s`,
-      ),
+      d1.prepare(LATEST_RATES_SQL),
     ]);
 
     const monthList: StatsMonth[] = Array.from({ length: 12 }, (_, i) => ({
@@ -106,20 +98,13 @@ export const statsRoutes = new Hono<AppEnv>().get(
       (a, b) => a.type.localeCompare(b.type) || b.totalMinor - a.totalMinor || a.name.localeCompare(b.name),
     );
 
-    const latest: Record<string, number> = {};
-    let latestDate: string | null = null;
-    for (const r of (rates?.results ?? []) as RateRow[]) {
-      latest[r.currency] = r.rateScaled;
-      if (latestDate === null || r.sourceDate > latestDate) latestDate = r.sourceDate;
-    }
-
     const body: StatsResponse = {
       year,
       baseCurrency: (household?.results[0] as { baseCurrency: string } | undefined)?.baseCurrency ?? "EUR",
       months: monthList,
       byCategory,
       waitingCount: (waiting?.results[0] as { n: number } | undefined)?.n ?? 0,
-      latestRates: { date: latestDate, rates: latest },
+      latestRates: latestRatesBody((rates?.results ?? []) as StoredRate[]),
     };
     return c.json(body);
   },

@@ -1,4 +1,3 @@
-import { zValidator } from "@hono/zod-validator";
 import type { ValidationIssue } from "@shared/schemas/entry";
 import {
   emailChangeSchema,
@@ -6,13 +5,13 @@ import {
   type SettingsResponse,
   type ThemeChoice,
 } from "@shared/schemas/settings";
-import type { Context } from "hono";
 import { Hono } from "hono";
-import type { z } from "zod";
 import { keyMatches } from "../auth/password";
+import { readHouseholdRow } from "../db/household";
 import type { AppEnv } from "../lib/env";
 import { jsonError } from "../lib/errors";
 import { nowIso } from "../lib/time";
+import { validate } from "../lib/validate";
 
 type UserRow = {
   id: string;
@@ -23,17 +22,6 @@ type UserRow = {
   theme: ThemeChoice | null;
 };
 
-function validate<T extends z.ZodType>(schema: T) {
-  return zValidator("json", schema, (result, c: Context) => {
-    if (result.success) return;
-    const issues: ValidationIssue[] = result.error.issues.map((i) => ({
-      path: i.path.map((p) => (typeof p === "number" ? p : String(p))),
-      message: i.message,
-    }));
-    return c.json({ error: "validation_failed", issues }, 422);
-  });
-}
-
 function findUser(db: D1Database, id: string) {
   return db
     .prepare("SELECT id, name, email, verifier, secondary_currency, theme FROM users WHERE id = ?")
@@ -41,17 +29,11 @@ function findUser(db: D1Database, id: string) {
     .first<UserRow>();
 }
 
-function household(db: D1Database) {
-  return db
-    .prepare("SELECT base_currency, timezone FROM household WHERE id = 1")
-    .first<{ base_currency: string; timezone: string }>();
-}
-
 async function readSettings(db: D1Database, userId: string): Promise<SettingsResponse | null> {
   const [me, partner, house] = await Promise.all([
     findUser(db, userId),
     db.prepare("SELECT id, name FROM users WHERE id <> ?").bind(userId).first<{ id: string; name: string }>(),
-    household(db),
+    readHouseholdRow(db),
   ]);
   if (!me || !house) return null;
   return {
@@ -69,7 +51,7 @@ async function readSettings(db: D1Database, userId: string): Promise<SettingsRes
 
 /**
  * The signed-in partner's own settings. The household base currency and time zone are read-only:
- * there is no endpoint that changes them. Paths carry their own prefix; mount at "/".
+ * there is no endpoint that changes them.
  */
 export const settingsRoutes = new Hono<AppEnv>()
   .get("/settings", async (c) => {
@@ -78,13 +60,13 @@ export const settingsRoutes = new Hono<AppEnv>()
     return c.json(body);
   })
 
-  .patch("/settings/profile", validate(profilePatchSchema), async (c) => {
+  .patch("/settings/profile", validate("json", profilePatchSchema), async (c) => {
     const patch = c.req.valid("json");
     const db = c.env.DB;
     const id = c.var.user.id;
 
     if (patch.secondaryCurrency) {
-      const house = await household(db);
+      const house = await readHouseholdRow(db);
       if (house && patch.secondaryCurrency === house.base_currency) {
         const issues: ValidationIssue[] = [
           { path: ["secondaryCurrency"], message: "must differ from the base currency" },
@@ -118,7 +100,7 @@ export const settingsRoutes = new Hono<AppEnv>()
     return c.json(body);
   })
 
-  .post("/settings/email", validate(emailChangeSchema), async (c) => {
+  .post("/settings/email", validate("json", emailChangeSchema), async (c) => {
     const { currentKey, email } = c.req.valid("json");
     const db = c.env.DB;
     const id = c.var.user.id;

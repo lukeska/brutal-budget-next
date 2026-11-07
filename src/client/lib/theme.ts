@@ -20,9 +20,11 @@ function readStored(): Theme {
 
 let current: Theme | null = null;
 let systemMql: MediaQueryList | null = null;
+let systemIsDark = false;
 const listeners = new Set<() => void>();
 
 function systemDark(): boolean {
+  if (systemMql) return systemIsDark;
   return typeof window.matchMedia === "function" && window.matchMedia(DARK_QUERY).matches;
 }
 
@@ -35,7 +37,8 @@ function apply() {
   document.documentElement.classList.toggle("dark", resolved(getTheme()) === "dark");
 }
 
-function onSystemChange() {
+function onSystemChange(event: { matches: boolean }) {
+  systemIsDark = event.matches;
   apply();
   for (const listener of listeners) listener();
 }
@@ -43,6 +46,7 @@ function onSystemChange() {
 function watchSystem() {
   if (systemMql || typeof window.matchMedia !== "function") return;
   systemMql = window.matchMedia(DARK_QUERY);
+  systemIsDark = systemMql.matches;
   systemMql.addEventListener("change", onSystemChange);
 }
 

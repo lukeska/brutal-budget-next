@@ -7,8 +7,9 @@ import { type ChangeEvent, type ReactNode, useEffect, useMemo, useState } from "
 import { Button } from "../../components/ui/button";
 import { Label } from "../../components/ui/label";
 import { Select } from "../../components/ui/select";
+import { errorMessage } from "../../lib/api";
 import { cn } from "../../lib/cn";
-import { errorMessage, useAccounts } from "../accounts/api";
+import { useAccounts } from "../accounts/api";
 import { useCategories } from "../categories/api";
 import { useProjects } from "../projects/api";
 import { useSettings } from "../settings/api";
@@ -30,7 +31,7 @@ import {
   type ParsedFile,
   parseCsvFile,
   type RowError,
-  rateRange,
+  rateWindowsForRows,
 } from "./parse";
 
 type Stage =
@@ -232,10 +233,12 @@ export function ImportWizard() {
     }
   }
 
-  async function runCommit(rows: CsvRow[]) {
+  async function runCommit(rows: CsvRow[], existing: ReadonlySet<number>) {
     if (!file || !settings) return;
+    // Rows the preview found already stored are not sent again; the server would only skip them.
+    const fresh = rows.filter((r) => !existing.has(r.rowNumber));
     setFailure(null);
-    setStage({ kind: "committing", label: "Importing", done: 0, total: rows.length });
+    setStage({ kind: "committing", label: "Importing", done: 0, total: fresh.length });
     try {
       let id = batchId;
       if (!id) {
@@ -247,16 +250,19 @@ export function ImportWizard() {
         id = batch.id;
         setBatchId(id);
       }
-      const range = rateRange(rows, currencies, settings.household.baseCurrency);
-      if (range) {
-        await fillRates(range, (done, total) =>
+      const windows = rateWindowsForRows(fresh, currencies, settings.household.baseCurrency);
+      if (windows.length > 0) {
+        await fillRates(windows, (done, total) =>
           setStage({ kind: "committing", label: "Fetching exchange rates", done, total }),
         );
       }
-      const summary = await commitRows(id, rows, (done, total) =>
+      const summary = await commitRows(id, fresh, (done, total) =>
         setStage({ kind: "committing", label: "Importing", done, total }),
       );
-      setStage({ kind: "done", summary });
+      setStage({
+        kind: "done",
+        summary: { ...summary, skipped: summary.skipped + (rows.length - fresh.length) },
+      });
     } catch (err) {
       setFailure(
         `${errorMessage(err, "The import stopped")}. Try again: rows already stored are skipped, never doubled.`,
@@ -377,7 +383,7 @@ export function ImportWizard() {
           skipInvalid={skipInvalid}
           onSkipInvalid={setSkipInvalid}
           committing={stage.kind === "committing" ? stage : null}
-          onConfirm={() => runCommit(preview.rows)}
+          onConfirm={() => runCommit(preview.rows, preview.existing)}
         />
       )}
 

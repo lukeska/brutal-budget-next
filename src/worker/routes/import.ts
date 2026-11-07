@@ -1,4 +1,3 @@
-import { zValidator } from "@hono/zod-validator";
 import { convertMinor, type ScaledRates } from "@shared/fx-math";
 import { COLOUR_PALETTE, FALLBACK_ICON, isKnownIcon } from "@shared/icons";
 import { assertCurrencyCode, type CurrencyCode } from "@shared/money";
@@ -17,36 +16,23 @@ import {
   matchKey,
 } from "@shared/schemas/csv";
 import type { ValidationIssue } from "@shared/schemas/entry";
-import type { Context } from "hono";
 import { Hono } from "hono";
-import type { z } from "zod";
+import { HOUSEHOLD_SQL, type HouseholdRow, parseHousehold } from "../db/household";
 import { baseValueFromSnapshot } from "../fx/base-value";
 import { loadRateSnapshot, type RateSnapshot } from "../fx/rates";
-import { minDate, todayIn } from "../fx/today";
+import { minDate, safeToday } from "../fx/today";
 import { sha256Hex } from "../lib/crypto";
 import type { AppEnv } from "../lib/env";
 import { HttpError } from "../lib/errors";
 import { newId } from "../lib/ids";
 import { nowIso } from "../lib/time";
+import { validate } from "../lib/validate";
 
 /**
  * CSV import. The browser parses the file; these endpoints fingerprint rows, report which are
  * already stored, store them chunk by chunk under an import batch, and undo a whole batch.
  * Exchange rates for the file's dates are filled beforehand through GET /api/rates?from&to.
  */
-
-function validate<T extends z.ZodType>(target: "json", schema: T) {
-  return zValidator(target, schema, (result, c: Context) => {
-    if (result.success) return;
-    const issues: ValidationIssue[] = result.error.issues.map((i) => ({
-      path: i.path.map((p) => (typeof p === "number" ? p : String(p))),
-      message: i.message,
-    }));
-    return c.json({ error: "validation_failed", issues }, 422);
-  });
-}
-
-// ---------- fingerprints ----------
 
 /**
  * A stable identity for a file row: the same row uploaded again, with different whitespace or
@@ -75,8 +61,6 @@ async function existingFingerprints(d1: D1Database, fingerprints: string[]): Pro
     .all<{ fingerprint: string }>();
   return new Set(results.map((r) => r.fingerprint));
 }
-
-// ---------- categories and projects ----------
 
 /** New categories and projects take the palette's middle shades in turn. */
 const NEW_COLOURS = COLOUR_PALETTE.map((h) => h.shades[1]);
@@ -250,8 +234,6 @@ async function resolveNames(
   return { categoryIds, projectIds };
 }
 
-// ---------- money ----------
-
 /** Rates to convert on `date` from stored rows, or the newest rates for dates after the newest publication. */
 function ratesOn(date: string, currencies: CurrencyCode[], snapshot: RateSnapshot): ScaledRates | null {
   const pivots = currencies.filter((c) => c !== "EUR");
@@ -281,8 +263,6 @@ function accountAmountFor(row: CsvRow, accountCurrency: CurrencyCode, snapshot: 
   });
   return converted > 0 ? converted : null;
 }
-
-// ---------- commit ----------
 
 const ENTRY_COLUMNS = `id, kind, date, user_id, account_id, account_amount_minor, orig_currency, orig_amount_minor,
   base_amount_minor, fx_state, rate_scaled, rate_date, category_id, project_id, notes, fingerprint,
@@ -332,14 +312,6 @@ function insertStatements(d1: D1Database, batchId: string, now: string, values: 
   return statements;
 }
 
-function safeToday(timeZone: string): string {
-  try {
-    return todayIn(timeZone);
-  } catch {
-    return todayIn("UTC");
-  }
-}
-
 async function commitRows(d1: D1Database, batchId: string, rows: CsvRow[]): Promise<ImportRowsResponse> {
   const accountIds = [...new Set(rows.map((r) => r.accountId))];
   const userIds = [...new Set(rows.map((r) => r.userId))];
@@ -347,7 +319,7 @@ async function commitRows(d1: D1Database, batchId: string, rows: CsvRow[]): Prom
     Record<string, unknown>
   >([
     d1.prepare("SELECT id FROM import_batches WHERE id = ?1").bind(batchId),
-    d1.prepare("SELECT base_currency, timezone FROM household WHERE id = 1"),
+    d1.prepare(HOUSEHOLD_SQL),
     d1
       .prepare("SELECT id, currency, archived_at FROM accounts WHERE id IN (SELECT value FROM json_each(?1))")
       .bind(JSON.stringify(accountIds)),
@@ -358,10 +330,8 @@ async function commitRows(d1: D1Database, batchId: string, rows: CsvRow[]): Prom
     d1.prepare(SELECT_PROJECTS),
   ]);
   if (!batch?.results[0]) throw new HttpError(404, "not_found");
-  const h = household?.results[0] as { base_currency: string; timezone: string } | undefined;
-  if (!h) throw new HttpError(409, "not_set_up");
-  assertCurrencyCode(h.base_currency);
-  const baseCurrency = h.base_currency;
+  const h = parseHousehold(household?.results[0] as HouseholdRow | undefined);
+  const baseCurrency = h.baseCurrency;
   const today = safeToday(h.timezone);
 
   const activeAccounts = new Map<string, CurrencyCode>();
@@ -446,8 +416,6 @@ async function commitRows(d1: D1Database, batchId: string, rows: CsvRow[]): Prom
   return { inserted, skipped: values.length - inserted, failed };
 }
 
-// ---------- batches ----------
-
 interface BatchRow {
   id: string;
   user_id: string;
@@ -479,7 +447,6 @@ async function readBatch(d1: D1Database, id: string): Promise<ImportBatch> {
   return toBatch(row);
 }
 
-/** CSV import. Paths carry their own prefix; mount at "/". */
 export const importRoutes = new Hono<AppEnv>()
   .post("/import/check", validate("json", importCheckRequestSchema), async (c) => {
     const { rows } = c.req.valid("json");

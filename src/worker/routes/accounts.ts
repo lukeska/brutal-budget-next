@@ -1,4 +1,3 @@
-import { zValidator } from "@hono/zod-validator";
 import type { CurrencyCode } from "@shared/money";
 import {
   type Account,
@@ -13,33 +12,14 @@ import {
   historyQuerySchema,
   reconcileCreateSchema,
 } from "@shared/schemas/account";
-import { CONFLICT_MESSAGE, type ValidationIssue } from "@shared/schemas/entry";
-import type { Context } from "hono";
+import { CONFLICT_MESSAGE } from "@shared/schemas/entry";
 import { Hono } from "hono";
-import type { z } from "zod";
 import type { AppEnv } from "../lib/env";
-import { HttpError } from "../lib/errors";
+import { HttpError, invalid } from "../lib/errors";
 import { nowIso } from "../lib/time";
+import { validate } from "../lib/validate";
 import { accountBalances, balanceAsOf, changesSinceReconcile } from "../services/balances";
 import { bookReconciliation, deleteReconciliation, listReconciliations } from "../services/reconcile";
-
-/** Validates a request part, answering 422 with field issues when it doesn't parse. */
-function validate<T extends z.ZodType>(target: "json" | "query", schema: T) {
-  return zValidator(target, schema, (result, c: Context) => {
-    if (result.success) return;
-    const issues: ValidationIssue[] = result.error.issues.map((i) => ({
-      path: i.path.map((p) => (typeof p === "number" ? p : String(p))),
-      message: i.message,
-    }));
-    return c.json({ error: "validation_failed", issues }, 422);
-  });
-}
-
-function invalid(field: string, message: string): HttpError {
-  return new HttpError(422, "validation_failed", { issues: [{ path: [field], message }] });
-}
-
-// ---------- reading accounts ----------
 
 interface AccountRow {
   id: string;
@@ -87,8 +67,6 @@ async function requireAccount(d1: D1Database, id: string): Promise<Account> {
   if (!account) throw new HttpError(404, "not_found");
   return account;
 }
-
-// ---------- writing accounts ----------
 
 async function createAccount(
   d1: D1Database,
@@ -176,8 +154,6 @@ async function deleteAccount(d1: D1Database, id: string, version: number): Promi
   if (current) throw new HttpError(409, "conflict", { message: CONFLICT_MESSAGE, current });
 }
 
-// ---------- history ----------
-
 interface HistoryDbRow {
   id: string;
   kind: HistoryRow["kind"];
@@ -252,9 +228,7 @@ async function accountHistory(
   return { rows, nextBefore: results.length > limit && last ? last.id : null };
 }
 
-// ---------- routes ----------
-
-/** Accounts, their history and reconciliations. Paths carry their own prefix; mount at "/". */
+/** Accounts, their history and reconciliations. */
 export const accountsRoutes = new Hono<AppEnv>()
   .get("/accounts", async (c) => c.json(await readAccounts(c.env.DB)))
   .post("/accounts", validate("json", accountCreateSchema), async (c) => {

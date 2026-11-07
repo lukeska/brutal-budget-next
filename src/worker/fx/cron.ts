@@ -1,8 +1,9 @@
 import { assertCurrencyCode, type CurrencyCode } from "@shared/money";
+import { parseHousehold, readHouseholdRow } from "../db/household";
 import type { FxState } from "../db/schema";
 import { baseValueFromSnapshot } from "./base-value";
 import { ensureRange, loadRateSnapshot, MAX_RANGE_DAYS, refreshRates } from "./rates";
-import { daysBetween, todayIn } from "./today";
+import { daysBetween, safeToday } from "./today";
 
 /** Entries revalued per run; the rest wait for the next run. */
 const ENTRY_BATCH = 200;
@@ -24,27 +25,17 @@ interface Candidate {
  */
 export async function runFxCron(d1: D1Database, now: Date = new Date()): Promise<void> {
   try {
-    const household = await d1
-      .prepare("SELECT base_currency AS baseCurrency, timezone FROM household WHERE id = 1")
-      .first<{ baseCurrency: string; timezone: string }>();
-    const today = safeToday(household?.timezone ?? "UTC", now);
+    const row = await readHouseholdRow(d1);
+    const today = safeToday(row?.timezone, now);
 
     const refreshed = await refreshRates(d1, today);
     if (!refreshed.ok) console.error("Exchange-rate refresh failed", refreshed.reason);
-    if (!household) return;
+    if (!row) return;
 
-    assertCurrencyCode(household.baseCurrency);
-    await fixPendingEntries(d1, household.baseCurrency, today, now.toISOString());
+    const { baseCurrency } = parseHousehold(row);
+    await fixPendingEntries(d1, baseCurrency, today, now.toISOString());
   } catch (err) {
     console.error("Exchange-rate job failed", err instanceof Error ? err.message : String(err));
-  }
-}
-
-function safeToday(timeZone: string, now: Date): string {
-  try {
-    return todayIn(timeZone, now);
-  } catch {
-    return todayIn("UTC", now);
   }
 }
 

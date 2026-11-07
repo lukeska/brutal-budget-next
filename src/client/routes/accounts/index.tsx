@@ -13,12 +13,12 @@ import { Select } from "../../components/ui/select";
 import { Sheet } from "../../components/ui/sheet";
 import { toast } from "../../components/ui/toast";
 import {
-  errorMessage,
   parseSignedAmount,
   useAccounts,
   useCreateAccount,
   useUpdateAccount,
 } from "../../features/accounts/api";
+import { errorMessage } from "../../lib/api";
 
 export const Route = createFileRoute("/accounts/")({
   component: AccountsScreen,

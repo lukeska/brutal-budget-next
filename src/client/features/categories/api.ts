@@ -9,6 +9,7 @@ import type {
 } from "@shared/schemas/category";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
+import { invalidateEntryViews } from "../entries/api";
 
 export const categoryKeys = {
   all: ["categories"] as const,
@@ -46,7 +47,7 @@ export function useCategorySummary(id: string, month?: string) {
 /** Merges and deletions also move or drop entries, so month and statistics caches refresh too. */
 function useInvalidateAll() {
   const client = useQueryClient();
-  return () => client.invalidateQueries();
+  return () => invalidateEntryViews(client);
 }
 
 function useInvalidateCategories() {

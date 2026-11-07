@@ -21,3 +21,7 @@ export function jsonError(
 ) {
   return c.json({ error: code, ...extra }, status);
 }
+
+export function invalid(path: string, message: string): HttpError {
+  return new HttpError(422, "validation_failed", { issues: [{ path: [path], message }] });
+}

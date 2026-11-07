@@ -176,7 +176,6 @@ function validateRow(raw: Record<Column, string>, rowNumber: number): ParsedRow 
   return row;
 }
 
-/** Parses the CSV text of an import file. */
 export function parseCsv(text: string): ParseResult {
   const parsed = Papa.parse<Record<string, string>>(text.replace(/^﻿/, ""), {
     header: true,
@@ -247,8 +246,6 @@ export async function parseCsvFile(file: File): Promise<ParsedFile> {
   const text = new TextDecoder("utf-8").decode(bytes);
   return { ...parseCsv(text), fileName: file.name, fileSha256: await sha256Hex(bytes) };
 }
-
-// ---------- after mapping ----------
 
 export interface Mapping {
   /** File account name ("" for none) -> account id. */
@@ -333,8 +330,6 @@ export function matchPartner(
     ?.id;
 }
 
-// ---------- requests ----------
-
 export function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
@@ -359,6 +354,17 @@ export function rateWindows(
   return windows;
 }
 
+function needsRate(
+  r: CsvRow,
+  accountCurrencies: ReadonlyMap<string, CurrencyCode>,
+  baseCurrency: string,
+): boolean {
+  const accountCurrency = accountCurrencies.get(r.accountId);
+  return (
+    accountCurrency !== baseCurrency || (r.currency !== accountCurrency && r.accountAmountMinor === undefined)
+  );
+}
+
 /** The date span of rows that need an exchange rate, or null when none do. */
 export function rateRange(
   rows: CsvRow[],
@@ -368,13 +374,38 @@ export function rateRange(
   let from: string | null = null;
   let to: string | null = null;
   for (const r of rows) {
-    const accountCurrency = accountCurrencies.get(r.accountId);
-    const needsRate =
-      accountCurrency !== baseCurrency ||
-      (r.currency !== accountCurrency && r.accountAmountMinor === undefined);
-    if (!needsRate) continue;
+    if (!needsRate(r, accountCurrencies, baseCurrency)) continue;
     if (from === null || r.date < from) from = r.date;
     if (to === null || r.date > to) to = r.date;
   }
   return from && to ? { from, to } : null;
+}
+
+/**
+ * Windows of at most `days` days covering every date of rows that need an exchange rate. A gap of
+ * `days` or more between two such dates starts a new run, so long stretches without rows cost no requests.
+ */
+export function rateWindowsForRows(
+  rows: CsvRow[],
+  accountCurrencies: ReadonlyMap<string, CurrencyCode>,
+  baseCurrency: string,
+  days = RATE_WINDOW_DAYS,
+): { from: string; to: string }[] {
+  const dates = [
+    ...new Set(rows.filter((r) => needsRate(r, accountCurrencies, baseCurrency)).map((r) => r.date)),
+  ].sort();
+  const windows: { from: string; to: string }[] = [];
+  let start: string | undefined;
+  let prev: string | undefined;
+  for (const date of dates) {
+    if (start === undefined || prev === undefined) {
+      start = date;
+    } else if (date >= addDays(prev, days)) {
+      windows.push(...rateWindows(start, prev, days));
+      start = date;
+    }
+    prev = date;
+  }
+  if (start !== undefined && prev !== undefined) windows.push(...rateWindows(start, prev, days));
+  return windows;
 }

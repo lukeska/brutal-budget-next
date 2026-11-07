@@ -14,7 +14,6 @@ import { Sheet } from "../../components/ui/sheet";
 import { toast } from "../../components/ui/toast";
 import { openEdit } from "../../drawer/store";
 import {
-  errorMessage,
   parseSignedAmount,
   useAccount,
   useAccountHistory,
@@ -26,25 +25,15 @@ import {
   useReconciliations,
   useUpdateAccount,
 } from "../../features/accounts/api";
-import { ApiError } from "../../lib/api";
+import { ApiError, errorMessage } from "../../lib/api";
+import { formatIsoDate, todayIn } from "../../lib/date";
 
 export const Route = createFileRoute("/accounts/$accountId")({
   component: AccountScreen,
 });
 
 function formatDay(date: string, withYear = false): string {
-  return new Date(`${date}T00:00:00Z`).toLocaleDateString(undefined, {
-    day: "numeric",
-    month: "short",
-    year: withYear ? "numeric" : undefined,
-    timeZone: "UTC",
-  });
-}
-
-function localToday(): string {
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  return formatIsoDate(date, { day: "numeric", month: "short", year: withYear ? "numeric" : undefined });
 }
 
 function AccountScreen() {
@@ -109,8 +98,6 @@ function AccountScreen() {
     </Page>
   );
 }
-
-// ---------- history ----------
 
 function History({ account }: { account: Account }) {
   const history = useAccountHistory(account.id);
@@ -191,8 +178,6 @@ function HistoryItem({ row, currency, label }: { row: HistoryRow; currency: Curr
   );
 }
 
-// ---------- reconciliations ----------
-
 function Reconciliations({ account }: { account: Account }) {
   const { data } = useReconciliations(account.id);
   const remove = useDeleteReconciliation();
@@ -251,7 +236,7 @@ function ReconcileSheet({
   open: boolean;
   onClose: () => void;
 }) {
-  const [date, setDate] = useState(localToday);
+  const [date, setDate] = useState(() => todayIn(undefined));
   const [bank, setBank] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const balance = useBalanceAt(account.id, date, open);
@@ -365,8 +350,6 @@ function ReconcileSheet({
     </Sheet>
   );
 }
-
-// ---------- editing ----------
 
 function EditSheet({ account, onClose }: { account: Account; onClose: () => void }) {
   const update = useUpdateAccount(account.id);

@@ -1,6 +1,7 @@
 /** Calendar-date helpers. Dates are `YYYY-MM-DD` strings; arithmetic is done in UTC. */
 
-const DAY_MS = 86_400_000;
+import { DAY_MS } from "../lib/time";
+
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /** Today's calendar date in an IANA time zone. Throws RangeError for an unknown zone. */
@@ -13,6 +14,15 @@ export function todayIn(timeZone: string, now: Date = new Date()): string {
   }).formatToParts(now);
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
   return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+/** Today in the zone, falling back to UTC when the zone is missing or unknown. */
+export function safeToday(timeZone: string | undefined, now: Date = new Date()): string {
+  try {
+    return todayIn(timeZone ?? "UTC", now);
+  } catch {
+    return todayIn("UTC", now);
+  }
 }
 
 /** True for a real calendar date in `YYYY-MM-DD` form. */
@@ -45,3 +55,9 @@ export function eachDay(from: string, to: string): string[] {
 
 export const minDate = (a: string, b: string) => (a < b ? a : b);
 export const maxDate = (a: string, b: string) => (a > b ? a : b);
+
+/** First day of the month after `month` (`YYYY-MM`). */
+export function nextMonthStart(month: string): string {
+  const [y, m] = month.split("-").map(Number) as [number, number];
+  return m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
+}

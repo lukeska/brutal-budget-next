@@ -110,9 +110,10 @@ export function useDeleteEntry() {
         action: {
           label: "Undo",
           onClick: () => {
-            restore.mutate(restorePayload(entry), {
-              onError: () => toast("Couldn't restore the entry — try again"),
-            });
+            // Per-call promise, so overlapping restores each report their own failure.
+            restore
+              .mutateAsync(restorePayload(entry))
+              .catch(() => toast("Couldn't restore the entry — try again"));
           },
         },
       });

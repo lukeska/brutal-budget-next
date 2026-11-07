@@ -9,11 +9,12 @@ import {
 } from "@shared/schemas/project";
 import { Hono } from "hono";
 import type { z } from "zod";
+import { runDelete } from "../lib/delete";
 import type { AppEnv } from "../lib/env";
 import { HttpError } from "../lib/errors";
 import { nowIso } from "../lib/time";
+import { validate } from "../lib/validate";
 import { listEntries } from "../services/entries";
-import { runDelete, validate } from "./categories";
 
 interface ProjectRow {
   id: string;
@@ -136,7 +137,7 @@ async function projectSummary(d1: D1Database, id: string): Promise<ProjectSummar
   };
 }
 
-/** Projects: colour-coded tags across categories. Paths carry their own prefix; mount at "/". */
+/** Projects: colour-coded tags across categories. */
 export const projectsRoutes = new Hono<AppEnv>()
   .get("/projects", async (c) => c.json(await listProjects(c.env.DB)))
   .post("/projects", validate("json", projectCreateSchema), async (c) => {

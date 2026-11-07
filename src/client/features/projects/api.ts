@@ -1,6 +1,7 @@
 import type { Project, ProjectCreate, ProjectPatch, ProjectSummary } from "@shared/schemas/project";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../../lib/api";
+import { invalidateEntryViews } from "../entries/api";
 
 export const projectKeys = {
   all: ["projects"] as const,
@@ -39,7 +40,7 @@ export function useUpdateProject() {
     mutationFn: ({ id, ...patch }: ProjectPatch & { id: string }) =>
       api.patch<Project>(`/api/projects/${id}`, patch),
     // A new name or colour shows on entries everywhere.
-    onSettled: () => client.invalidateQueries(),
+    onSettled: () => invalidateEntryViews(client),
   });
 }
 

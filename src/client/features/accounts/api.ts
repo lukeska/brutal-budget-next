@@ -9,7 +9,7 @@ import type {
   Reconciliation,
 } from "@shared/schemas/account";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ApiError, api } from "../../lib/api";
+import { api } from "../../lib/api";
 
 /** Root of every account query. Invalidate it after any entry change: balances and history move. */
 export const accountsQueryKey = ["accounts"] as const;
@@ -118,14 +118,4 @@ export function parseSignedAmount(input: string, currency: CurrencyCode): ParseA
   const negative = trimmed.startsWith("-");
   const result = parseAmount(negative ? trimmed.slice(1) : trimmed, currency);
   return result.ok && negative ? { ok: true, minor: -result.minor } : result;
-}
-
-/** A one-line message for a failed account request: the first field issue, the server's message, or a fallback. */
-export function errorMessage(err: unknown, fallback = "Something went wrong — try again"): string {
-  if (!(err instanceof ApiError)) return fallback;
-  const body = err.body as { message?: unknown; issues?: { message?: unknown }[] } | null;
-  const issue = body?.issues?.[0]?.message;
-  if (typeof issue === "string") return issue;
-  if (typeof body?.message === "string") return body.message;
-  return fallback;
 }

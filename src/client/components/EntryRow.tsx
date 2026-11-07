@@ -4,7 +4,6 @@ import { IconArrowsRightLeft, IconScale } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 import { type PointerEvent, useRef, useState } from "react";
 import { openEdit } from "../drawer/store";
-import { useDeleteEntry } from "../features/entries/api";
 import { cn } from "../lib/cn";
 import { CategoryIcon } from "./CategoryIcon";
 
@@ -89,8 +88,13 @@ const ROW = "relative flex w-full items-center gap-3 bg-bg px-1 py-3 text-left";
  * On touch, a horizontal swipe past the threshold deletes it with an Undo toast; a mostly vertical
  * movement is left to the page scroll and never deletes.
  */
-export function EntryRow({ entry }: { entry: MonthEntry }) {
-  const remove = useDeleteEntry();
+export function EntryRow({
+  entry,
+  onDelete,
+}: {
+  entry: MonthEntry;
+  onDelete: (entry: MonthEntry) => Promise<unknown>;
+}) {
   const gesture = useRef<Gesture | null>(null);
   const swiped = useRef(false);
   const [offset, setOffset] = useState(0);
@@ -150,7 +154,7 @@ export function EntryRow({ entry }: { entry: MonthEntry }) {
       return;
     }
     setOffset(-(g.width || window.innerWidth));
-    remove.mutate(entry, { onError: () => setOffset(0) });
+    onDelete(entry).catch(() => setOffset(0));
   };
 
   return (

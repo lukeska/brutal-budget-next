@@ -1,4 +1,3 @@
-import { zValidator } from "@hono/zod-validator";
 import type { CurrencyCode } from "@shared/money";
 import {
   type MonthCategory,
@@ -9,7 +8,10 @@ import {
 } from "@shared/schemas/month";
 import { Hono } from "hono";
 import type { EntryKind, FxState } from "../db/schema";
+import { LATEST_RATES_SQL, latestRatesBody, type StoredRate } from "../fx/rates";
+import { nextMonthStart } from "../fx/today";
 import type { AppEnv } from "../lib/env";
+import { validate } from "../lib/validate";
 
 /** Only expenses and income with a base value count; transfers, adjustments and waiting entries don't. */
 const COUNTED = "e.kind IN ('expense', 'income') AND e.fx_state <> 'waiting'";
@@ -29,7 +31,6 @@ type CategoryTotalRow = {
   parent_colour: string | null;
   total: number;
 };
-type RateRow = { currency: string; rateScaled: number; sourceDate: string };
 interface EntryRow {
   id: string;
   kind: EntryKind;
@@ -172,27 +173,11 @@ function categoryTree(rows: CategoryTotalRow[]): MonthCategory[] {
   return list.sort((a, b) => (a.type === b.type ? byTotal(a, b) : a.type === "expense" ? -1 : 1));
 }
 
-function nextMonthStart(month: string): string {
-  const [y, m] = month.split("-").map(Number) as [number, number];
-  return m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
-}
-
-function validationFailed(error: { issues: { path: PropertyKey[]; message: string }[] }) {
-  return {
-    error: "validation_failed",
-    issues: error.issues.map((i) => ({ path: i.path.map(String), message: i.message })),
-  };
-}
-
-/** The month view in one D1 batch. Paths carry their own prefix; mount at "/". */
+/** The month view in one D1 batch. */
 export const monthRoutes = new Hono<AppEnv>().get(
   "/month/:month",
-  zValidator("param", monthParamSchema, (result, c) => {
-    if (!result.success) return c.json(validationFailed(result.error), 422);
-  }),
-  zValidator("query", monthQuerySchema, (result, c) => {
-    if (!result.success) return c.json(validationFailed(result.error), 422);
-  }),
+  validate("param", monthParamSchema),
+  validate("query", monthQuerySchema),
   async (c) => {
     const { month } = c.req.valid("param");
     const userId = c.req.valid("query").userId ?? null;
@@ -227,23 +212,12 @@ export const monthRoutes = new Hono<AppEnv>().get(
            WHERE ${SCOPE} AND e.kind IN ('expense', 'income') AND e.fx_state = 'waiting'`,
         )
         .bind(...scope),
-      d1.prepare(
-        `SELECT f.currency, f.rate_scaled AS rateScaled, f.source_date AS sourceDate FROM fx_rates f
-         JOIN (SELECT currency, MAX(source_date) AS s FROM fx_rates GROUP BY currency) m
-           ON f.currency = m.currency AND f.date = m.s`,
-      ),
+      d1.prepare(LATEST_RATES_SQL),
     ]);
 
     const t = (totals?.results[0] as TotalsRow | undefined) ?? { income: 0, expense: 0 };
     const incomeMinor = t.income ?? 0;
     const expenseMinor = t.expense ?? 0;
-
-    const latest: Record<string, number> = {};
-    let latestDate: string | null = null;
-    for (const r of (rates?.results ?? []) as RateRow[]) {
-      latest[r.currency] = r.rateScaled;
-      if (latestDate === null || r.sourceDate > latestDate) latestDate = r.sourceDate;
-    }
 
     const body: MonthResponse = {
       month,
@@ -252,7 +226,7 @@ export const monthRoutes = new Hono<AppEnv>().get(
       categories: categoryTree((categories?.results ?? []) as CategoryTotalRow[]),
       entries: ((entries?.results ?? []) as EntryRow[]).map(toMonthEntry),
       waitingCount: (waiting?.results[0] as { n: number } | undefined)?.n ?? 0,
-      latestRates: { date: latestDate, rates: latest },
+      latestRates: latestRatesBody((rates?.results ?? []) as StoredRate[]),
     };
     return c.json(body);
   },

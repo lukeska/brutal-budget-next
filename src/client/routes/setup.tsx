@@ -158,7 +158,6 @@ function Wizard() {
     });
   }
 
-  /** Checks the current step; returns an error message or null. */
   function validate(): string | null {
     if (step === "household" && !isTimeZone(timezone.trim())) {
       return "Unknown time zone. Use a name like Europe/Rome.";

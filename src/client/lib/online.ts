@@ -50,10 +50,6 @@ export function markOnline(): void {
   emit();
 }
 
-export function isOnline(): boolean {
-  return snapshot();
-}
-
 /** False when the browser is offline or the last request failed on the network. Disable saving on false. */
 export function useOnline(): boolean {
   return useSyncExternalStore(subscribe, snapshot, () => true);

@@ -1,8 +1,9 @@
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
-import { ensureRange, loadRateSnapshot, MAX_RANGE_DAYS, refreshRates } from "../fx/rates";
-import { daysBetween, eachDay, isIsoDate, todayIn } from "../fx/today";
+import { readHouseholdRow } from "../db/household";
+import { ensureRange, loadLatestRates, MAX_RANGE_DAYS, refreshRates } from "../fx/rates";
+import { daysBetween, eachDay, isIsoDate, safeToday } from "../fx/today";
 
 type RatesEnv = { Bindings: Env };
 
@@ -20,12 +21,7 @@ interface StoredRate {
 }
 
 async function householdToday(d1: D1Database): Promise<string> {
-  const row = await d1.prepare("SELECT timezone FROM household WHERE id = 1").first<{ timezone: string }>();
-  try {
-    return todayIn(row?.timezone ?? "UTC");
-  } catch {
-    return todayIn("UTC");
-  }
+  return safeToday((await readHouseholdRow(d1))?.timezone);
 }
 
 /** Exchange-rate endpoints (rates are units per 1 EUR, scaled by 10^10; EUR itself is implied). */
@@ -66,10 +62,10 @@ export const ratesRoutes = new Hono<RatesEnv>()
   )
   .get("/rates/latest", async (c) => {
     const d1 = c.env.DB;
-    let { latest } = await loadRateSnapshot(d1, []);
+    let latest = await loadLatestRates(d1);
     if (latest.size === 0) {
       await refreshRates(d1, await householdToday(d1));
-      ({ latest } = await loadRateSnapshot(d1, []));
+      latest = await loadLatestRates(d1);
     }
     if (latest.size === 0) return c.json({ status: "unavailable", date: null, rates: {} });
     const rates: Record<string, number> = {};

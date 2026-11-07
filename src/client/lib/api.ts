@@ -12,6 +12,16 @@ export class ApiError extends Error {
   }
 }
 
+/** A one-line message for a failed request: the first field issue, the server's message, or a fallback. */
+export function errorMessage(err: unknown, fallback = "Something went wrong — try again"): string {
+  if (!(err instanceof ApiError)) return fallback;
+  const body = err.body as { message?: unknown; issues?: { message?: unknown }[] } | null;
+  const issue = body?.issues?.[0]?.message;
+  if (typeof issue === "string" && issue) return issue;
+  if (typeof body?.message === "string" && body.message) return body.message;
+  return fallback;
+}
+
 type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 /** Receives the login URL (with `next`) when the session has expired. */

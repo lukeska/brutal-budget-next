@@ -1,6 +1,7 @@
 import type { MonthResponse } from "@shared/schemas/month";
 import { keepPreviousData, type QueryClient, useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
+import { todayIn } from "../../lib/date";
 import { monthQueryRoot } from "../entries/api";
 
 /** Under the month root, so any entry change refreshes every cached month. */
@@ -32,5 +33,5 @@ export function shiftMonth(month: string, delta: number): string {
 }
 
 export function currentMonth(now = new Date()): string {
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  return todayIn(undefined, now).slice(0, 7);
 }

@@ -13,7 +13,7 @@ export interface RateRow {
   sourceDate: string;
 }
 
-interface StoredRate extends RateRow {
+export interface StoredRate extends RateRow {
   date: string;
   currency: string;
 }
@@ -177,13 +177,35 @@ export interface RateSnapshot {
   byDate: Map<string, RateRow>;
 }
 
+/** Newest published rate per currency: the row stored on that currency's newest publication day. */
+export const LATEST_RATES_SQL = `SELECT f.date, f.currency, f.rate_scaled AS rateScaled, f.source_date AS sourceDate
+  FROM fx_rates f
+  JOIN (SELECT currency, MAX(source_date) AS s FROM fx_rates GROUP BY currency) m
+    ON f.currency = m.currency AND f.date = m.s`;
+
+function latestMap(rows: StoredRate[]): Map<string, RateRow> {
+  return new Map(rows.map((r) => [r.currency, r]));
+}
+
+export async function loadLatestRates(d1: D1Database): Promise<Map<string, RateRow>> {
+  const { results } = await d1.prepare(LATEST_RATES_SQL).all<StoredRate>();
+  return latestMap(results);
+}
+
+/** Latest rates as the month and stats views report them, from `LATEST_RATES_SQL` rows. */
+export function latestRatesBody(rows: StoredRate[]): { date: string | null; rates: Record<string, number> } {
+  const rates: Record<string, number> = {};
+  let date: string | null = null;
+  for (const r of rows) {
+    rates[r.currency] = r.rateScaled;
+    if (date === null || r.sourceDate > date) date = r.sourceDate;
+  }
+  return { date, rates };
+}
+
 export async function loadRateSnapshot(d1: D1Database, dates: string[]): Promise<RateSnapshot> {
   const [latest, byDate] = await d1.batch<StoredRate>([
-    d1.prepare(
-      `SELECT f.date, f.currency, f.rate_scaled AS rateScaled, f.source_date AS sourceDate FROM fx_rates f
-       JOIN (SELECT currency, MAX(source_date) AS s FROM fx_rates GROUP BY currency) m
-         ON f.currency = m.currency AND f.date = m.s`,
-    ),
+    d1.prepare(LATEST_RATES_SQL),
     d1
       .prepare(
         `SELECT date, currency, rate_scaled AS rateScaled, source_date AS sourceDate FROM fx_rates
@@ -192,7 +214,7 @@ export async function loadRateSnapshot(d1: D1Database, dates: string[]): Promise
       .bind(JSON.stringify([...new Set(dates)])),
   ]);
   return {
-    latest: new Map((latest?.results ?? []).map((r) => [r.currency, r])),
+    latest: latestMap(latest?.results ?? []),
     byDate: new Map((byDate?.results ?? []).map((r) => [`${r.date}|${r.currency}`, r])),
   };
 }

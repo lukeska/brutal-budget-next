@@ -21,7 +21,7 @@ import {
   useMergeCategory,
   useUpdateCategory,
 } from "../../features/categories/api";
-import { ApiError } from "../../lib/api";
+import { errorMessage } from "../../lib/api";
 import { cn } from "../../lib/cn";
 
 export const Route = createFileRoute("/categories/")({
@@ -37,15 +37,6 @@ const TYPES = [
 type Editing =
   | { mode: "create"; parent: CategoryNode | null }
   | { mode: "edit"; category: Category; parent: CategoryNode | null; node: CategoryNode | null };
-
-function errorMessage(err: unknown): string {
-  if (err instanceof ApiError) {
-    const body = err.body as { message?: string; issues?: { message: string }[] } | null;
-    if (body?.issues?.[0]) return body.issues[0].message;
-    if (body?.message) return body.message;
-  }
-  return "Something went wrong — try again";
-}
 
 function CategoriesPage() {
   const [type, setType] = useState<CategoryType>("expense");

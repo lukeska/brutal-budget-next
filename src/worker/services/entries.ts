@@ -8,13 +8,12 @@ import {
   type EntryPatch,
   type ValidationIssue,
 } from "@shared/schemas/entry";
+import { HOUSEHOLD_SQL, type HouseholdRow, parseHousehold, readHouseholdRow } from "../db/household";
 import type { EntryKind, FxState } from "../db/schema";
 import { type BaseValue, computeBaseValue } from "../fx/base-value";
-import { addDays, todayIn } from "../fx/today";
+import { addDays, nextMonthStart, safeToday } from "../fx/today";
 import { HttpError } from "../lib/errors";
 import { nowIso } from "../lib/time";
-
-// ---------- rows and mapping ----------
 
 interface EntryRow {
   id: string;
@@ -85,8 +84,6 @@ export async function getEntry(d1: D1Database, id: string): Promise<Entry | null
   return row ? toEntry(row) : null;
 }
 
-// ---------- errors ----------
-
 function invalid(issues: ValidationIssue[]): HttpError {
   return new HttpError(422, "validation_failed", { issues });
 }
@@ -98,8 +95,6 @@ function conflict(current: EntryRow): HttpError {
 const ADJUSTMENT_LOCKED = invalid([
   { path: ["kind"], message: "Adjustments are changed through their reconciliation" },
 ]);
-
-// ---------- referenced rows ----------
 
 interface Household {
   baseCurrency: CurrencyCode;
@@ -123,20 +118,12 @@ interface Refs {
   userExists: boolean;
 }
 
-function safeToday(timeZone: string): string {
-  try {
-    return todayIn(timeZone);
-  } catch {
-    return todayIn("UTC");
-  }
-}
-
 async function loadRefs(
   d1: D1Database,
   want: { accountIds: string[]; categoryId: string | null; projectId: string | null; userId: string },
 ): Promise<Refs> {
   const [household, accounts, category, project, user] = await d1.batch<Record<string, unknown>>([
-    d1.prepare("SELECT base_currency, timezone FROM household WHERE id = 1"),
+    d1.prepare(HOUSEHOLD_SQL),
     d1
       .prepare("SELECT id, currency, archived_at FROM accounts WHERE id IN (SELECT value FROM json_each(?1))")
       .bind(JSON.stringify(want.accountIds)),
@@ -144,9 +131,7 @@ async function loadRefs(
     d1.prepare("SELECT id, archived_at FROM projects WHERE id = ?1").bind(want.projectId),
     d1.prepare("SELECT id FROM users WHERE id = ?1").bind(want.userId),
   ]);
-  const h = household?.results[0] as { base_currency: string; timezone: string } | undefined;
-  if (!h) throw new HttpError(409, "not_set_up");
-  assertCurrencyCode(h.base_currency);
+  const h = parseHousehold(household?.results[0] as HouseholdRow | undefined);
   const c = category?.results[0] as { id: string; type: "expense" | "income"; archived_at: string | null };
   const p = project?.results[0] as { id: string; archived_at: string | null } | undefined;
   const accountRows = (accounts?.results ?? []) as {
@@ -155,7 +140,7 @@ async function loadRefs(
     archived_at: string | null;
   }[];
   return {
-    household: { baseCurrency: h.base_currency, today: safeToday(h.timezone) },
+    household: { baseCurrency: h.baseCurrency, today: safeToday(h.timezone) },
     accounts: new Map(
       accountRows.map((a) => {
         assertCurrencyCode(a.currency);
@@ -167,8 +152,6 @@ async function loadRefs(
     userExists: (user?.results.length ?? 0) > 0,
   };
 }
-
-// ---------- resolving a payload into stored columns ----------
 
 /** The fields of an entry as the client describes them, after merging an edit onto the stored row. */
 interface Draft {
@@ -321,8 +304,6 @@ function baseValueFor(d1: D1Database, values: Values, refs: Refs): Promise<BaseV
   });
 }
 
-// ---------- create ----------
-
 function draftFromCreate(input: EntryCreate, sessionUserId: string): Draft {
   const base = {
     date: input.date,
@@ -375,10 +356,6 @@ function matchesExisting(draft: Draft, refs: Refs, existing: EntryRow): boolean 
 
 export type CreateResult = { status: 200 | 201; entry: Entry };
 
-/**
- * Creates an entry under the client's id. Posting the same payload again returns the stored row;
- * a different payload under an existing id is a conflict. Undoing a delete posts the old id again.
- */
 /** SQL guard: account (?5) and optional to-account (?7) still have the validated currencies (?19, ?20). */
 const CURRENCIES_UNCHANGED = `(SELECT currency FROM accounts WHERE id = ?5) = ?19
          AND (?7 IS NULL OR (SELECT currency FROM accounts WHERE id = ?7) = ?20)`;
@@ -389,6 +366,10 @@ const ACCOUNT_CURRENCY_CHANGED = new HttpError(409, "account_currency_changed", 
   message: "An account's currency changed while you were editing — reload and try again",
 });
 
+/**
+ * Creates an entry under the client's id. Posting the same payload again returns the stored row;
+ * a different payload under an existing id is a conflict. Undoing a delete posts the old id again.
+ */
 export async function createEntry(
   d1: D1Database,
   sessionUserId: string,
@@ -453,8 +434,6 @@ export async function createEntry(
   if (meta.changes === 0) return replay(row);
   return { status: 201, entry: toEntry(row) };
 }
-
-// ---------- update ----------
 
 function draftFromPatch(existing: EntryRow, patch: EntryPatch, refs: Refs, issues: ValidationIssue[]): Draft {
   const kind = existing.kind as Draft["kind"];
@@ -594,8 +573,6 @@ export async function updateEntry(d1: D1Database, id: string, patch: EntryPatch)
   return toEntry(current);
 }
 
-// ---------- delete ----------
-
 /** Deletes when `version` still matches. Already gone is success; a stale version is a 409. */
 export async function deleteEntry(d1: D1Database, id: string, version: number): Promise<void> {
   const { meta } = await d1
@@ -609,27 +586,37 @@ export async function deleteEntry(d1: D1Database, id: string, version: number): 
   throw conflict(current);
 }
 
-// ---------- reads ----------
+export type EntryFilter = EntryListQuery & { categoryIds?: string[] };
 
 /** Entries newest first (by date, then creation), with optional filters. */
-export async function listEntries(d1: D1Database, query: EntryListQuery): Promise<Entry[]> {
+export function entriesStatement(d1: D1Database, query: EntryFilter): D1PreparedStatement {
   const where: string[] = [];
   const params: unknown[] = [];
   const add = (clause: string, value: unknown) => {
     params.push(value);
     where.push(clause.replaceAll("?", `?${params.length}`));
   };
-  if (query.month) add("e.date LIKE ? || '-%'", query.month);
+  if (query.month) {
+    add("e.date >= ?", `${query.month}-01`);
+    add("e.date < ?", nextMonthStart(query.month));
+  }
   if (query.accountId) add("(e.account_id = ? OR e.to_account_id = ?)", query.accountId);
   if (query.categoryId) add("e.category_id = ?", query.categoryId);
+  if (query.categoryIds)
+    add("e.category_id IN (SELECT value FROM json_each(?))", JSON.stringify(query.categoryIds));
   if (query.projectId) add("e.project_id = ?", query.projectId);
   if (query.userId) add("e.user_id = ?", query.userId);
   const sql = `${SELECT_ENTRY} ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
     ORDER BY e.date DESC, e.created_at DESC, e.id DESC`;
-  const { results } = await d1
-    .prepare(sql)
-    .bind(...params)
-    .all<EntryRow>();
+  return d1.prepare(sql).bind(...params);
+}
+
+export function toEntries(rows: unknown[]): Entry[] {
+  return (rows as EntryRow[]).map(toEntry);
+}
+
+export async function listEntries(d1: D1Database, query: EntryFilter): Promise<Entry[]> {
+  const { results } = await entriesStatement(d1, query).all<EntryRow>();
   return results.map(toEntry);
 }
 
@@ -638,8 +625,7 @@ const TOP_CATEGORY_DAYS = 90;
 
 /** Drawer defaults for one partner: their last usable account per kind and most-used categories. */
 export async function entryDefaults(d1: D1Database, userId: string): Promise<EntryDefaults> {
-  const tz = await d1.prepare("SELECT timezone FROM household WHERE id = 1").first<{ timezone: string }>();
-  const since = addDays(safeToday(tz?.timezone ?? "UTC"), -TOP_CATEGORY_DAYS);
+  const since = addDays(safeToday((await readHouseholdRow(d1))?.timezone), -TOP_CATEGORY_DAYS);
   const [accounts, categories] = await d1.batch<Record<string, string | number>>([
     d1
       .prepare(
