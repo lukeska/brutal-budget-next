@@ -15,7 +15,7 @@
     "verbatimModuleSyntax": true,
     "allowImportingTsExtensions": true,
     "noEmit": true,
-    "types": ["vite/client", "vite-plugin-pwa/react", "@testing-library/jest-dom/vitest"],
+    "types": ["vite/client", "vite-plugin-pwa/client", "@testing-library/jest-dom/vitest"],
     "paths": {
       "@client/*": ["./src/client/*"],
       "@shared/*": ["./src/shared/*"]

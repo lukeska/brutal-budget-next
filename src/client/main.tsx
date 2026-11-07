@@ -3,6 +3,7 @@ import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { queryClient } from "./lib/query";
+import { registerServiceWorker } from "./pwa";
 import "./drawer";
 import { routeTree } from "./routeTree.gen";
 import "./styles.css";
@@ -29,3 +30,5 @@ createRoot(root).render(
     </QueryClientProvider>
   </StrictMode>,
 );
+
+registerServiceWorker();
