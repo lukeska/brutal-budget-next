@@ -6,6 +6,7 @@ import { accountsRoutes } from "./routes/accounts";
 import { authRoutes } from "./routes/auth";
 import { categoriesRoutes } from "./routes/categories";
 import { entriesRoutes } from "./routes/entries";
+import { monthRoutes } from "./routes/month";
 import { projectsRoutes } from "./routes/projects";
 import { ratesRoutes } from "./routes/rates";
 import { settingsRoutes } from "./routes/settings";
@@ -55,6 +56,9 @@ export function createApp() {
   app.use("/projects", requireSession);
   app.use("/projects/*", requireSession);
   app.route("/", projectsRoutes);
+  app.use("/month", requireSession);
+  app.use("/month/*", requireSession);
+  app.route("/", monthRoutes);
 
   app.notFound((c) => c.json({ error: "not_found" }, 404));
 
