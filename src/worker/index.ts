@@ -1,10 +1,11 @@
 import { createApp } from "./app";
+import { runFxCron } from "./fx/cron";
 
 const app = createApp();
 
 export default {
   fetch: app.fetch,
-  async scheduled(_controller, _env, _ctx) {
-    // Exchange-rate refresh is wired in by the FX service.
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(runFxCron(env.DB, new Date(controller.scheduledTime)));
   },
 } satisfies ExportedHandler<Env>;

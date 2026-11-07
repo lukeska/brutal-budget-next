@@ -9,6 +9,11 @@ describe("api shell", () => {
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
+  it("refuses data routes without a session", async () => {
+    const res = await exports.default.fetch("https://app.test/api/rates/latest");
+    expect(res.status).toBe(401);
+  });
+
   it("returns a JSON 404 for unknown API routes instead of the SPA", async () => {
     const res = await exports.default.fetch("https://app.test/api/does-not-exist");
     expect(res.status).toBe(404);

@@ -1,8 +1,9 @@
 import { Hono } from "hono";
-import { authRateLimit, csrfGuard, requireStrongSecrets } from "./auth/middleware";
+import { authRateLimit, csrfGuard, requireSession, requireStrongSecrets } from "./auth/middleware";
 import type { AppEnv } from "./lib/env";
 import { HttpError } from "./lib/errors";
 import { authRoutes } from "./routes/auth";
+import { ratesRoutes } from "./routes/rates";
 
 export type { AppEnv } from "./lib/env";
 
@@ -22,6 +23,11 @@ export function createApp() {
   app.use("/setup", requireStrongSecrets, authRateLimit);
   app.use("/setup/*", requireStrongSecrets, authRateLimit);
   app.route("/auth", authRoutes);
+
+  // Everything below needs a signed-in partner.
+  app.use("/rates", requireSession);
+  app.use("/rates/*", requireSession);
+  app.route("/", ratesRoutes);
 
   app.notFound((c) => c.json({ error: "not_found" }, 404));
 
