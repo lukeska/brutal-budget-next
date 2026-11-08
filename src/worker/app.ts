@@ -63,6 +63,7 @@ export function createApp() {
   app.route("/", projectsRoutes);
   app.use("/month", requireSession);
   app.use("/month/*", requireSession);
+  app.use("/month-summaries", requireSession);
   app.route("/", monthRoutes);
   app.use("/import", requireSession);
   app.use("/import/*", requireSession);

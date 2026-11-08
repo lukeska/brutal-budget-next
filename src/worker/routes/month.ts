@@ -3,8 +3,10 @@ import {
   type MonthCategory,
   type MonthEntry,
   type MonthResponse,
+  type MonthSummariesResponse,
   monthParamSchema,
   monthQuerySchema,
+  monthSummariesQuerySchema,
 } from "@shared/schemas/month";
 import { Hono } from "hono";
 import type { EntryKind, FxState } from "../db/schema";
@@ -177,28 +179,68 @@ function categoryTree(rows: CategoryTotalRow[]): MonthCategory[] {
 }
 
 /** The month view in one D1 batch. */
-export const monthRoutes = new Hono<AppEnv>().get(
-  "/month/:month",
-  validate("param", monthParamSchema),
-  validate("query", monthQuerySchema),
-  async (c) => {
-    const { month } = c.req.valid("param");
-    const userId = c.req.valid("query").userId ?? null;
-    const scope = [`${month}-01`, nextMonthStart(month), userId] as const;
+export const monthRoutes = new Hono<AppEnv>()
+  .get("/month-summaries", validate("query", monthSummariesQuerySchema), async (c) => {
+    const { from, to } = c.req.valid("query");
     const d1 = c.env.DB;
-
-    const [household, totals, categories, entries, waiting, rates] = await d1.batch<unknown>([
+    const [household, summaries] = await d1.batch<unknown>([
       d1.prepare("SELECT base_currency AS baseCurrency FROM household WHERE id = 1"),
       d1
         .prepare(
-          `SELECT SUM(CASE WHEN e.kind = 'income' THEN e.base_amount_minor ELSE 0 END) AS income,
+          `SELECT strftime('%Y-%m', e.date) AS month,
+                    SUM(e.base_amount_minor) AS expense
+             FROM entries e
+             WHERE e.date >= ?1 AND e.date < ?2
+               AND e.kind = 'expense' AND e.fx_state <> 'waiting'
+             GROUP BY strftime('%Y-%m', e.date)`,
+        )
+        .bind(`${from}-01`, nextMonthStart(to)),
+    ]);
+    const rows = (summaries?.results ?? []) as { month: string; expense: number }[];
+    const map = new Map(rows.map((r) => [r.month, r.expense]));
+
+    // Fill in every month in the range so the client always gets 25 entries.
+    const months: { month: string; expenseMinor: number }[] = [];
+    let [y, m] = from.split("-").map(Number) as [number, number];
+    const [endY, endM] = to.split("-").map(Number) as [number, number];
+    while (y < endY || (y === endY && m <= endM)) {
+      const key = `${y}-${String(m).padStart(2, "0")}`;
+      months.push({ month: key, expenseMinor: map.get(key) ?? 0 });
+      m++;
+      if (m > 12) {
+        m = 1;
+        y++;
+      }
+    }
+
+    const body: MonthSummariesResponse = {
+      baseCurrency: (household?.results[0] as { baseCurrency: string } | undefined)?.baseCurrency ?? "EUR",
+      months,
+    };
+    return c.json(body);
+  })
+  .get(
+    "/month/:month",
+    validate("param", monthParamSchema),
+    validate("query", monthQuerySchema),
+    async (c) => {
+      const { month } = c.req.valid("param");
+      const userId = c.req.valid("query").userId ?? null;
+      const scope = [`${month}-01`, nextMonthStart(month), userId] as const;
+      const d1 = c.env.DB;
+
+      const [household, totals, categories, entries, waiting, rates] = await d1.batch<unknown>([
+        d1.prepare("SELECT base_currency AS baseCurrency FROM household WHERE id = 1"),
+        d1
+          .prepare(
+            `SELECT SUM(CASE WHEN e.kind = 'income' THEN e.base_amount_minor ELSE 0 END) AS income,
                   SUM(CASE WHEN e.kind = 'expense' THEN e.base_amount_minor ELSE 0 END) AS expense
            FROM entries e WHERE ${SCOPE} AND ${COUNTED}`,
-        )
-        .bind(...scope),
-      d1
-        .prepare(
-          `SELECT c.id, c.parent_id, c.type, c.name, c.icon, c.colour,
+          )
+          .bind(...scope),
+        d1
+          .prepare(
+            `SELECT c.id, c.parent_id, c.type, c.name, c.icon, c.colour,
                   p.name AS parent_name, p.icon AS parent_icon, p.colour AS parent_colour,
                   SUM(e.base_amount_minor) AS total
            FROM entries e
@@ -206,31 +248,31 @@ export const monthRoutes = new Hono<AppEnv>().get(
            LEFT JOIN categories p ON p.id = c.parent_id
            WHERE ${SCOPE} AND ${COUNTED}
            GROUP BY c.id`,
-        )
-        .bind(...scope),
-      d1.prepare(ENTRIES_SQL).bind(...scope),
-      d1
-        .prepare(
-          `SELECT COUNT(*) AS n FROM entries e
+          )
+          .bind(...scope),
+        d1.prepare(ENTRIES_SQL).bind(...scope),
+        d1
+          .prepare(
+            `SELECT COUNT(*) AS n FROM entries e
            WHERE ${SCOPE} AND e.kind IN ('expense', 'income') AND e.fx_state = 'waiting'`,
-        )
-        .bind(...scope),
-      d1.prepare(LATEST_RATES_SQL),
-    ]);
+          )
+          .bind(...scope),
+        d1.prepare(LATEST_RATES_SQL),
+      ]);
 
-    const t = (totals?.results[0] as TotalsRow | undefined) ?? { income: 0, expense: 0 };
-    const incomeMinor = t.income ?? 0;
-    const expenseMinor = t.expense ?? 0;
+      const t = (totals?.results[0] as TotalsRow | undefined) ?? { income: 0, expense: 0 };
+      const incomeMinor = t.income ?? 0;
+      const expenseMinor = t.expense ?? 0;
 
-    const body: MonthResponse = {
-      month,
-      baseCurrency: (household?.results[0] as { baseCurrency: string } | undefined)?.baseCurrency ?? "EUR",
-      totals: { incomeMinor, expenseMinor, netMinor: incomeMinor - expenseMinor },
-      categories: categoryTree((categories?.results ?? []) as CategoryTotalRow[]),
-      entries: ((entries?.results ?? []) as EntryRow[]).map(toMonthEntry),
-      waitingCount: (waiting?.results[0] as { n: number } | undefined)?.n ?? 0,
-      latestRates: latestRatesBody((rates?.results ?? []) as StoredRate[]),
-    };
-    return c.json(body);
-  },
-);
+      const body: MonthResponse = {
+        month,
+        baseCurrency: (household?.results[0] as { baseCurrency: string } | undefined)?.baseCurrency ?? "EUR",
+        totals: { incomeMinor, expenseMinor, netMinor: incomeMinor - expenseMinor },
+        categories: categoryTree((categories?.results ?? []) as CategoryTotalRow[]),
+        entries: ((entries?.results ?? []) as EntryRow[]).map(toMonthEntry),
+        waitingCount: (waiting?.results[0] as { n: number } | undefined)?.n ?? 0,
+        latestRates: latestRatesBody((rates?.results ?? []) as StoredRate[]),
+      };
+      return c.json(body);
+    },
+  );

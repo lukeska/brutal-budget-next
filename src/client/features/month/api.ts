@@ -1,4 +1,4 @@
-import type { MonthResponse } from "@shared/schemas/month";
+import type { MonthResponse, MonthSummariesResponse } from "@shared/schemas/month";
 import { keepPreviousData, type QueryClient, useQuery } from "@tanstack/react-query";
 import { api } from "../../lib/api";
 import { todayIn } from "../../lib/date";
@@ -34,4 +34,15 @@ export function shiftMonth(month: string, delta: number): string {
 
 export function currentMonth(now = new Date()): string {
   return todayIn(undefined, now).slice(0, 7);
+}
+
+/** Expense totals for a range of months (used by the month stripe). */
+export function useMonthSummaries(from: string, to: string) {
+  return useQuery({
+    queryKey: [...monthQueryRoot, "summaries", from, to],
+    queryFn: () =>
+      api.get<MonthSummariesResponse>(
+        `/api/month-summaries?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`,
+      ),
+  });
 }

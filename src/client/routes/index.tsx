@@ -1,33 +1,37 @@
-import type { CurrencyCode } from "@shared/money";
+import { type CurrencyCode, formatMinor } from "@shared/money";
 import type { MonthCategory, MonthEntry, MonthResponse } from "@shared/schemas/month";
 import { IconChevronDown, IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
-import { useQueryClient } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { CategoryIcon, ColourDot } from "../components/CategoryIcon";
 import { EntryRow } from "../components/EntryRow";
 import { Button } from "../components/ui/button";
 import { Empty } from "../components/ui/empty";
 import { Money } from "../components/ui/money";
 import { Page } from "../components/ui/page";
-import { Segmented } from "../components/ui/segmented";
 import { openCreate } from "../drawer/store";
 import { useMe } from "../features/auth/use-me";
 import { type DisplayCurrency, useDisplayCurrency } from "../features/display-currency";
 import { useDeleteEntry } from "../features/entries/api";
-import { currentMonth, prefetchMonth, shiftMonth, useMonth } from "../features/month/api";
-import { useSettings } from "../features/settings/api";
+import { currentMonth, shiftMonth, useMonth, useMonthSummaries } from "../features/month/api";
 import { cn } from "../lib/cn";
 import { formatIsoDate } from "../lib/date";
 
+const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
 export const Route = createFileRoute("/")({
   component: MonthPage,
+  validateSearch: (search: Record<string, unknown>): { month?: string } => {
+    const m = search.month;
+    if (typeof m === "string" && MONTH_RE.test(m)) return { month: m };
+    return {};
+  },
 });
 
-const ALL = "all";
+const STRIPE_RADIUS = 12;
 
-function monthLabel(month: string): string {
-  return formatIsoDate(`${month}-01`, { month: "long", year: "numeric" });
+function shortMonthLabel(month: string): string {
+  return formatIsoDate(`${month}-01`, { month: "short", year: "numeric" });
 }
 
 function dayLabel(date: string): string {
@@ -56,80 +60,215 @@ function groupByDay(entries: MonthEntry[]): { date: string; netMinor: number; en
   return days;
 }
 
-/** Runs `fn` when the browser is idle (or soon, where idle callbacks don't exist). */
-function whenIdle(fn: () => void): () => void {
-  if (typeof window.requestIdleCallback === "function") {
-    const id = window.requestIdleCallback(fn, { timeout: 2000 });
-    return () => window.cancelIdleCallback(id);
-  }
-  const id = window.setTimeout(fn, 300);
-  return () => window.clearTimeout(id);
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+function MonthPicker({
+  selected,
+  onSelect,
+  onClose,
+}: {
+  selected: string;
+  onSelect: (month: string) => void;
+  onClose: () => void;
+}) {
+  const [year, setYear] = useState(() => Number(selected.split("-")[0]));
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      ref={ref}
+      className="absolute top-full left-1/2 z-20 mt-2 w-64 -translate-x-1/2 rounded-lg border border-rule bg-bg p-3 shadow-lg"
+    >
+      <div className="mb-2 flex items-center justify-between">
+        <button
+          type="button"
+          aria-label="Previous year"
+          onClick={() => setYear((y) => y - 1)}
+          className="rounded p-1 hover:bg-surface"
+        >
+          <IconChevronLeft aria-hidden size={16} />
+        </button>
+        <span className="text-sm font-medium">{year}</span>
+        <button
+          type="button"
+          aria-label="Next year"
+          onClick={() => setYear((y) => y + 1)}
+          className="rounded p-1 hover:bg-surface"
+        >
+          <IconChevronRight aria-hidden size={16} />
+        </button>
+      </div>
+      <div className="grid grid-cols-4 gap-1">
+        {MONTH_NAMES.map((name, i) => {
+          const m = `${year}-${String(i + 1).padStart(2, "0")}`;
+          const active = m === selected;
+          return (
+            <button
+              key={m}
+              type="button"
+              onClick={() => {
+                onSelect(m);
+                onClose();
+              }}
+              className={cn(
+                "rounded-md px-2 py-1.5 text-sm transition-colors",
+                active ? "bg-fg text-bg font-medium" : "hover:bg-surface",
+              )}
+            >
+              {name}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
-export function MonthPage() {
-  const client = useQueryClient();
-  const [month, setMonth] = useState(currentMonth);
-  const [partner, setPartner] = useState<string>(ALL);
-  const userId = partner === ALL ? undefined : partner;
-  const { data, isPending, isError } = useMonth(month, userId);
-  const display = useDisplayCurrency(data);
-  const { data: me } = useMe();
-  const { data: settings } = useSettings();
+function MonthStripe({ selected, onSelect }: { selected: string; onSelect: (month: string) => void }) {
+  // The center of the stripe only changes when the selected month falls outside its range.
+  const [center, setCenter] = useState(selected);
+  const firstMonth = shiftMonth(center, -STRIPE_RADIUS);
+  const lastMonth = shiftMonth(center, STRIPE_RADIUS);
+  if (selected < firstMonth || selected > lastMonth) setCenter(selected);
 
-  const prev = shiftMonth(month, -1);
-  const next = shiftMonth(month, 1);
-  useEffect(
-    () =>
-      whenIdle(() => {
-        void prefetchMonth(client, prev, userId);
-        void prefetchMonth(client, next, userId);
-      }),
-    [client, prev, next, userId],
-  );
+  const from = shiftMonth(center, -STRIPE_RADIUS);
+  const to = shiftMonth(center, STRIPE_RADIUS);
+  const { data } = useMonthSummaries(from, to);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
-  const partnerOptions = useMemo(() => {
-    const people = [settings?.me, settings?.partner].filter((p): p is { id: string; name: string } => !!p);
-    return [{ value: ALL, label: "All" }, ...people.map((p) => ({ value: p.id, label: p.name }))];
-  }, [settings]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const initialScrollDone = useRef(false);
 
-  const stepper = (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex items-center gap-2">
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Previous month"
-          onClick={() => setMonth(prev)}
-          onMouseEnter={() => void prefetchMonth(client, prev, userId)}
-          onFocus={() => void prefetchMonth(client, prev, userId)}
-        >
-          <IconChevronLeft aria-hidden size={20} />
-        </Button>
-        <span className="min-w-40 text-center font-numbers text-lg" aria-live="polite">
-          {monthLabel(month)}
-        </span>
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label="Next month"
-          onClick={() => setMonth(next)}
-          onMouseEnter={() => void prefetchMonth(client, next, userId)}
-          onFocus={() => void prefetchMonth(client, next, userId)}
-        >
-          <IconChevronRight aria-hidden size={20} />
-        </Button>
+  const months = useMemo(() => {
+    const list: string[] = [];
+    for (let i = -STRIPE_RADIUS; i <= STRIPE_RADIUS; i++) list.push(shiftMonth(center, i));
+    return list;
+  }, [center]);
+
+  const expenseMap = useMemo(() => {
+    const map = new Map<string, number>();
+    if (data) for (const m of data.months) map.set(m.month, m.expenseMinor);
+    return map;
+  }, [data]);
+
+  // Center the selected card on first render and when the stripe recenters.
+  useLayoutEffect(() => {
+    initialScrollDone.current = false;
+  }, [center]);
+
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const idx = months.indexOf(selected);
+    const card = el.children[idx] as HTMLElement | undefined;
+    if (!card) return;
+    const target = card.offsetLeft - el.offsetWidth / 2 + card.offsetWidth / 2;
+    if (!initialScrollDone.current) {
+      el.scrollLeft = target;
+      initialScrollDone.current = true;
+    }
+  }, [months, selected]);
+
+  const scroll = useCallback((dir: -1 | 1) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const card = el.firstElementChild as HTMLElement | null;
+    if (!card) return;
+    const style = getComputedStyle(el);
+    const gap = Number.parseFloat(style.gap) || 0;
+    el.scrollBy({ left: dir * (card.offsetWidth + gap), behavior: "smooth" });
+  }, []);
+
+  return (
+    <div className="relative" role="tablist" aria-label="Month">
+      {/* Left arrow — desktop only */}
+      <button
+        type="button"
+        aria-label="Scroll left"
+        onClick={() => scroll(-1)}
+        className="absolute top-0 bottom-0 -left-5 z-10 hidden w-9 items-center justify-center md:flex"
+      >
+        <IconChevronLeft aria-hidden size={20} className="text-muted" />
+      </button>
+
+      <div
+        ref={scrollRef}
+        className="flex gap-2 overflow-x-auto scroll-smooth scrollbar-none md:mx-4"
+        style={{ scrollSnapType: "x mandatory" }}
+      >
+        {months.map((m) => {
+          const active = m === selected;
+          const expense = expenseMap.get(m) ?? 0;
+          return (
+            <button
+              key={m}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => {
+                if (active) setPickerOpen((v) => !v);
+                else onSelect(m);
+              }}
+              className={cn(
+                "flex shrink-0 snap-start flex-col items-center rounded-lg border px-4 py-2 text-center transition-colors",
+                active ? "border-fg bg-fg text-bg" : "border-rule bg-surface text-fg hover:border-fg",
+              )}
+              style={{ minWidth: "6rem" }}
+            >
+              <span className="text-sm font-medium">{shortMonthLabel(m)}</span>
+              <span className={cn("font-numbers text-xs", active ? "text-bg/70" : "text-muted")}>
+                {data ? formatMinor(expense, data.baseCurrency as CurrencyCode) : "\u00A0"}
+              </span>
+            </button>
+          );
+        })}
       </div>
-      {partnerOptions.length > 1 && (
-        <Segmented
-          aria-label="Partner"
-          options={partnerOptions}
-          value={partner}
-          onChange={setPartner}
-          className="min-w-60"
-        />
+
+      {/* Right arrow — desktop only */}
+      <button
+        type="button"
+        aria-label="Scroll right"
+        onClick={() => scroll(1)}
+        className="absolute top-0 bottom-0 -right-5 z-10 hidden w-9 items-center justify-center md:flex"
+      >
+        <IconChevronRight aria-hidden size={20} className="text-muted" />
+      </button>
+
+      {pickerOpen && (
+        <MonthPicker selected={selected} onSelect={onSelect} onClose={() => setPickerOpen(false)} />
       )}
     </div>
   );
+}
+
+export function MonthPage() {
+  const { month: searchMonth } = Route.useSearch();
+  const navigate = useNavigate();
+  const month = searchMonth ?? currentMonth();
+  const setMonth = useCallback(
+    (m: string) => navigate({ to: "/", search: { month: m }, replace: true }),
+    [navigate],
+  );
+  const { data, isPending, isError } = useMonth(month);
+  const display = useDisplayCurrency(data);
+  const { data: me } = useMe();
+
+  const stepper = <MonthStripe selected={month} onSelect={setMonth} />;
 
   const actions = display.canToggle ? (
     <Button
@@ -143,7 +282,7 @@ export function MonthPage() {
   ) : undefined;
 
   return (
-    <Page title="Month" stepper={stepper} actions={actions}>
+    <Page stepper={stepper} actions={actions}>
       {isPending ? (
         <p className="text-muted">Loading…</p>
       ) : isError || !data ? (

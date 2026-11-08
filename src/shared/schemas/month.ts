@@ -68,3 +68,20 @@ export const monthResponseSchema = z.object({
   latestRates: latestRatesSchema,
 });
 export type MonthResponse = z.infer<typeof monthResponseSchema>;
+
+export const monthSummariesQuerySchema = z.object({
+  from: yearMonth,
+  to: yearMonth,
+});
+
+export const monthSummarySchema = z.object({
+  month: z.string(),
+  expenseMinor: z.number().int(),
+});
+export type MonthSummary = z.infer<typeof monthSummarySchema>;
+
+export const monthSummariesResponseSchema = z.object({
+  baseCurrency: z.string(),
+  months: z.array(monthSummarySchema),
+});
+export type MonthSummariesResponse = z.infer<typeof monthSummariesResponseSchema>;

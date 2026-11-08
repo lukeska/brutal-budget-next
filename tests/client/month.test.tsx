@@ -131,6 +131,8 @@ beforeEach(() => {
         partner: { id: BOB, name: "Bob" },
         household: { baseCurrency: "EUR", timezone: "Europe/Rome" },
       });
+    if (url.startsWith("/api/month-summaries"))
+      return json({ baseCurrency: "EUR", months: [{ month: "2026-11", expenseMinor: 5_870 }] });
     if (url.startsWith("/api/month/")) return json(MONTH);
     if (method === "DELETE" && url.startsWith("/api/entries/")) return new Response(null, { status: 204 });
     return json({ error: "not_found" }, 404);
