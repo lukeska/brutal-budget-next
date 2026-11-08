@@ -188,24 +188,26 @@ export const monthRoutes = new Hono<AppEnv>()
       d1
         .prepare(
           `SELECT strftime('%Y-%m', e.date) AS month,
-                    SUM(e.base_amount_minor) AS expense
+                    SUM(CASE WHEN e.kind = 'expense' THEN e.base_amount_minor ELSE 0 END) AS expense,
+                    SUM(CASE WHEN e.kind = 'income' THEN e.base_amount_minor ELSE 0 END) AS income
              FROM entries e
              WHERE e.date >= ?1 AND e.date < ?2
-               AND e.kind = 'expense' AND e.fx_state <> 'waiting'
+               AND e.kind IN ('expense', 'income') AND e.fx_state <> 'waiting'
              GROUP BY strftime('%Y-%m', e.date)`,
         )
         .bind(`${from}-01`, nextMonthStart(to)),
     ]);
-    const rows = (summaries?.results ?? []) as { month: string; expense: number }[];
-    const map = new Map(rows.map((r) => [r.month, r.expense]));
+    const rows = (summaries?.results ?? []) as { month: string; expense: number; income: number }[];
+    const map = new Map(rows.map((r) => [r.month, { expense: r.expense ?? 0, income: r.income ?? 0 }]));
 
     // Fill in every month in the range so the client always gets 25 entries.
-    const months: { month: string; expenseMinor: number }[] = [];
+    const months: { month: string; expenseMinor: number; incomeMinor: number }[] = [];
     let [y, m] = from.split("-").map(Number) as [number, number];
     const [endY, endM] = to.split("-").map(Number) as [number, number];
     while (y < endY || (y === endY && m <= endM)) {
       const key = `${y}-${String(m).padStart(2, "0")}`;
-      months.push({ month: key, expenseMinor: map.get(key) ?? 0 });
+      const totals = map.get(key);
+      months.push({ month: key, expenseMinor: totals?.expense ?? 0, incomeMinor: totals?.income ?? 0 });
       m++;
       if (m > 12) {
         m = 1;

@@ -77,6 +77,7 @@ export const monthSummariesQuerySchema = z.object({
 export const monthSummarySchema = z.object({
   month: z.string(),
   expenseMinor: z.number().int(),
+  incomeMinor: z.number().int(),
 });
 export type MonthSummary = z.infer<typeof monthSummarySchema>;
 

@@ -2,8 +2,9 @@ import { type CurrencyCode, formatMinor } from "@shared/money";
 import type { MonthCategory, MonthEntry, MonthResponse } from "@shared/schemas/month";
 import { IconChevronDown, IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { CategoryIcon, ColourDot } from "../components/CategoryIcon";
+import { createElement, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { CategoryIcon, ColourDot, iconComponent } from "../components/CategoryIcon";
 import { EntryRow } from "../components/EntryRow";
 import { Button } from "../components/ui/button";
 import { Empty } from "../components/ui/empty";
@@ -139,7 +140,15 @@ function MonthPicker({
   );
 }
 
-function MonthStripe({ selected, onSelect }: { selected: string; onSelect: (month: string) => void }) {
+function MonthStripe({
+  selected,
+  onSelect,
+  kindFilter,
+}: {
+  selected: string;
+  onSelect: (month: string) => void;
+  kindFilter: KindFilter;
+}) {
   // The center of the stripe only changes when the selected month falls outside its range.
   const [center, setCenter] = useState(selected);
   const firstMonth = shiftMonth(center, -STRIPE_RADIUS);
@@ -160,11 +169,13 @@ function MonthStripe({ selected, onSelect }: { selected: string; onSelect: (mont
     return list;
   }, [center]);
 
-  const expenseMap = useMemo(() => {
+  const amountMap = useMemo(() => {
     const map = new Map<string, number>();
-    if (data) for (const m of data.months) map.set(m.month, m.expenseMinor);
+    if (data)
+      for (const m of data.months)
+        map.set(m.month, kindFilter === "expense" ? m.expenseMinor : m.incomeMinor);
     return map;
-  }, [data]);
+  }, [data, kindFilter]);
 
   // Center the selected card on first render and when the stripe recenters.
   useLayoutEffect(() => {
@@ -213,7 +224,7 @@ function MonthStripe({ selected, onSelect }: { selected: string; onSelect: (mont
       >
         {months.map((m) => {
           const active = m === selected;
-          const expense = expenseMap.get(m) ?? 0;
+          const amount = amountMap.get(m) ?? 0;
           return (
             <button
               key={m}
@@ -232,7 +243,7 @@ function MonthStripe({ selected, onSelect }: { selected: string; onSelect: (mont
             >
               <span className="text-sm font-medium">{shortMonthLabel(m)}</span>
               <span className={cn("font-numbers text-xs", active ? "text-bg/70" : "text-muted")}>
-                {data ? formatMinor(expense, data.baseCurrency as CurrencyCode) : "\u00A0"}
+                {data ? formatMinor(amount, data.baseCurrency as CurrencyCode) : "\u00A0"}
               </span>
             </button>
           );
@@ -256,6 +267,8 @@ function MonthStripe({ selected, onSelect }: { selected: string; onSelect: (mont
   );
 }
 
+type KindFilter = "expense" | "income";
+
 export function MonthPage() {
   const { month: searchMonth } = Route.useSearch();
   const navigate = useNavigate();
@@ -264,11 +277,12 @@ export function MonthPage() {
     (m: string) => navigate({ to: "/", search: { month: m }, replace: true }),
     [navigate],
   );
+  const [kindFilter, setKindFilter] = useState<KindFilter>("expense");
   const { data, isPending, isError } = useMonth(month);
   const display = useDisplayCurrency(data);
   const { data: me } = useMe();
 
-  const stepper = <MonthStripe selected={month} onSelect={setMonth} />;
+  const stepper = <MonthStripe selected={month} onSelect={setMonth} kindFilter={kindFilter} />;
 
   const actions = display.canToggle ? (
     <Button
@@ -288,27 +302,321 @@ export function MonthPage() {
       ) : isError || !data ? (
         <p className="text-negative">Couldn't load this month.</p>
       ) : (
-        <MonthBody data={data} display={display} />
+        <MonthBody data={data} display={display} kindFilter={kindFilter} onKindChange={setKindFilter} />
       )}
     </Page>
   );
 }
 
-function MonthBody({ data, display }: { data: MonthResponse; display: DisplayCurrency }) {
+/* ---- Donut chart (ported from expense-donut.html) ---- */
+const DC = 200;
+const R_IN = 122;
+const R_OUT = 170;
+const SLICE_GAP = 0.05;
+const BREATH_S = 5;
+const BREATH_K = 0.022;
+const WAVE_PX = 4;
+const RND = 10;
+
+function polar(cx: number, cy: number, r: number, a: number): [number, number] {
+  return [cx + r * Math.sin(a), cy - r * Math.cos(a)];
+}
+
+function sector(cx: number, cy: number, r0: number, r1: number, a0: number, a1: number): string {
+  const lg = a1 - a0 > Math.PI ? 1 : 0;
+  const [x0, y0] = polar(cx, cy, r1, a0);
+  const [x1, y1] = polar(cx, cy, r1, a1);
+  const [x2, y2] = polar(cx, cy, r0, a1);
+  const [x3, y3] = polar(cx, cy, r0, a0);
+  return `M${x0} ${y0}A${r1} ${r1} 0 ${lg} 1 ${x1} ${y1}L${x2} ${y2}A${r0} ${r0} 0 ${lg} 0 ${x3} ${y3}Z`;
+}
+
+const iconMarkupCache = new Map<string, string>();
+function getIconMarkup(name: string): string {
+  let markup = iconMarkupCache.get(name);
+  if (markup !== undefined) return markup;
+  const Comp = iconComponent(name);
+  const html = renderToStaticMarkup(createElement(Comp, { size: 24, stroke: 2.2 }));
+  // Extract the inner content (paths) from the rendered <svg>...</svg>
+  const match = html.match(/<svg[^>]*>(.*)<\/svg>/s);
+  markup = match?.[1] ?? "";
+  iconMarkupCache.set(name, markup);
+  return markup;
+}
+
+const easeOut3 = (t: number) => 1 - (1 - t) ** 3;
+const prefersReduced =
+  typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function DonutChart({
+  categories,
+  totalMinor,
+  display,
+}: {
+  categories: MonthCategory[];
+  totalMinor: number;
+  display: DisplayCurrency;
+}) {
+  const svgRef = useRef<SVGSVGElement>(null);
+  const labelRef = useRef<HTMLDivElement>(null);
+  const amountRef = useRef<HTMLDivElement>(null);
+  const rafRef = useRef(0);
+  const pinnedRef = useRef<number | null>(null);
+  const stateRef = useRef({ shown: [] as number[], lift: [] as number[], t0: 0, last: 0 });
+
+  const N = categories.length;
+  const targets = useMemo(() => categories.map((c) => c.totalMinor), [categories]);
+
+  // Reset pinned when categories change
+  useEffect(() => {
+    pinnedRef.current = null;
+  }, [categories]);
+
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg || N === 0) return;
+    const ns = "http://www.w3.org/2000/svg";
+
+    svg.innerHTML = "";
+
+    // Defs
+    const defs = document.createElementNS(ns, "defs");
+    const flt = document.createElementNS(ns, "filter");
+    flt.id = "dg";
+    flt.setAttribute("x", "-30%");
+    flt.setAttribute("y", "-30%");
+    flt.setAttribute("width", "160%");
+    flt.setAttribute("height", "160%");
+    const blurEl = document.createElementNS(ns, "feGaussianBlur");
+    blurEl.id = "dgb";
+    blurEl.setAttribute("stdDeviation", "5");
+    blurEl.setAttribute("result", "b");
+    const mrg = document.createElementNS(ns, "feMerge");
+    mrg.innerHTML = '<feMergeNode in="b"/><feMergeNode in="SourceGraphic"/>';
+    flt.append(blurEl, mrg);
+    defs.append(flt);
+    svg.append(defs);
+
+    const root = document.createElementNS(ns, "g");
+    root.id = "dr";
+    const segsG = document.createElementNS(ns, "g");
+    segsG.setAttribute("filter", "url(#dg)");
+    const icnsG = document.createElementNS(ns, "g");
+    icnsG.setAttribute("pointer-events", "none");
+    root.append(segsG, icnsG);
+    svg.append(root);
+
+    const paths: SVGPathElement[] = [];
+    const iconGs: SVGGElement[] = [];
+
+    for (let i = 0; i < N; i++) {
+      const c = categories[i]!.colour || "#888";
+      const p = document.createElementNS(ns, "path");
+      p.setAttribute("fill", c);
+      p.setAttribute("stroke", c);
+      p.setAttribute("stroke-width", String(RND));
+      p.setAttribute("stroke-linejoin", "round");
+      p.style.cursor = "pointer";
+      p.addEventListener("click", (e) => {
+        e.stopPropagation();
+        pinnedRef.current = pinnedRef.current === i ? null : i;
+      });
+      segsG.append(p);
+      paths.push(p);
+
+      const ig = document.createElementNS(ns, "g");
+      ig.setAttribute("fill", "none");
+      ig.setAttribute("stroke", "#fff");
+      ig.setAttribute("stroke-width", "2.2");
+      ig.setAttribute("stroke-linecap", "round");
+      ig.setAttribute("stroke-linejoin", "round");
+      ig.innerHTML = getIconMarkup(categories[i]!.icon);
+      icnsG.append(ig);
+      iconGs.push(ig);
+    }
+
+    // Click background to deselect
+    svg.addEventListener("click", () => {
+      pinnedRef.current = null;
+    });
+
+    const s = stateRef.current;
+    s.shown = new Array(N).fill(0);
+    s.lift = new Array(N).fill(0);
+    s.t0 = performance.now();
+    s.last = s.t0;
+
+    function frame(now: number) {
+      const dt = Math.min(0.05, (now - s.last) / 1000);
+      s.last = now;
+      const t = (now - s.t0) / 1000;
+      const intro = prefersReduced ? 1 : easeOut3(Math.min(1, t / 1.2));
+      const k = prefersReduced ? 1 : 1 - Math.exp(-dt * 7);
+      const kl = prefersReduced ? 1 : 1 - Math.exp(-dt * 11);
+      const active = pinnedRef.current;
+
+      for (let i = 0; i < N; i++) {
+        s.shown[i] = s.shown[i]! + ((targets[i] ?? 0) - s.shown[i]!) * k;
+        s.lift[i] = s.lift[i]! + ((active === i ? 1 : 0) - s.lift[i]!) * kl;
+      }
+      const tot = s.shown.reduce((a, b) => a + b, 0);
+      const breath = prefersReduced ? 0 : Math.sin((t * Math.PI * 2) / BREATH_S);
+
+      const sc = 1 + BREATH_K * breath;
+      root.setAttribute("transform", `translate(${DC} ${DC}) scale(${sc}) translate(${-DC} ${-DC})`);
+      blurEl.setAttribute("stdDeviation", (5 + (3.5 * (breath + 1)) / 2).toFixed(2));
+
+      const vis = s.shown.filter((v) => v > tot * 0.002).length;
+      const sweep = intro * Math.PI * 2;
+      let acc = 0;
+
+      for (let i = 0; i < N; i++) {
+        const span = tot > 0 ? (s.shown[i]! / tot) * Math.PI * 2 : 0;
+        const a0 = acc;
+        const a1 = Math.min(acc + span, sweep);
+        acc += span;
+        const g = vis > 1 ? SLICE_GAP / 2 : 0;
+        const s0 = a0 + g;
+        const s1 = Math.min(a1 - g, s0 + Math.PI * 2 - 0.0005);
+        const pEl = paths[i]!;
+        const iEl = iconGs[i]!;
+
+        if (s1 - s0 < 0.004) {
+          pEl.setAttribute("d", "");
+          iEl.style.opacity = "0";
+          continue;
+        }
+
+        const mid = (s0 + s1) / 2;
+        const wave = prefersReduced ? 0 : Math.sin(t * 1.7 - i * 0.78) * WAVE_PX;
+        const lft = s.lift[i]!;
+        const off = lft * 7;
+        const cx = DC + off * Math.sin(mid);
+        const cy = DC - off * Math.cos(mid);
+        const r0 = R_IN + RND / 2 - lft * 2;
+        const r1 = R_OUT - RND / 2 + wave + lft * 12;
+        pEl.setAttribute("d", sector(cx, cy, r0, r1, s0, s1));
+        pEl.style.opacity = active == null || active === i ? "1" : "0.35";
+
+        const [ix, iy] = polar(cx, cy, (r0 + r1) / 2, mid);
+        const iconSc = 0.82 + lft * 0.22;
+        iEl.setAttribute("transform", `translate(${ix} ${iy}) scale(${iconSc}) translate(-12 -12)`);
+        iEl.style.opacity = s1 - s0 > 0.34 ? String(Math.min(1, (s1 - s0 - 0.34) * 6) * intro) : "0";
+      }
+
+      // Center readout
+      if (labelRef.current && amountRef.current) {
+        if (active != null && (targets[active] ?? 0) > 0) {
+          const cat = categories[active]!;
+          labelRef.current.textContent = cat.name;
+          labelRef.current.style.color = cat.colour || "";
+          amountRef.current.textContent = formatMinor(
+            Math.round(display.convert(s.shown[active]!)),
+            display.currency,
+          );
+        } else {
+          labelRef.current.textContent = "";
+          labelRef.current.style.color = "";
+          amountRef.current.textContent = formatMinor(
+            Math.round(display.convert(tot * intro)),
+            display.currency,
+          );
+        }
+      }
+
+      rafRef.current = requestAnimationFrame(frame);
+    }
+
+    rafRef.current = requestAnimationFrame(frame);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [categories, N, targets, display]);
+
+  if (N === 0 || totalMinor === 0) return null;
+
+  return (
+    <div className="flex justify-center">
+      <div className="relative" style={{ width: "min(100%, 340px)", aspectRatio: "1" }}>
+        <svg
+          ref={svgRef}
+          viewBox="0 0 400 400"
+          className="absolute inset-0 h-full w-full overflow-visible"
+          style={{ touchAction: "manipulation" }}
+          role="img"
+          aria-label="Category breakdown"
+        />
+        <div className="pointer-events-none absolute inset-0 grid place-content-center text-center">
+          <div ref={labelRef} className="text-sm font-semibold transition-colors" />
+          <div ref={amountRef} className="font-numbers text-2xl font-semibold tracking-tight md:text-3xl" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MonthBody({
+  data,
+  display,
+  kindFilter: filter,
+  onKindChange: setFilter,
+}: {
+  data: MonthResponse;
+  display: DisplayCurrency;
+  kindFilter: KindFilter;
+  onKindChange: (f: KindFilter) => void;
+}) {
   const { totals } = data;
-  const days = useMemo(() => groupByDay(data.entries), [data.entries]);
-  const expense = data.categories.filter((c) => c.type === "expense");
-  const income = data.categories.filter((c) => c.type === "income");
-  // One mutation for the list; each row awaits its own delete so a failure restores only that row.
+  const expenseCats = data.categories.filter((c) => c.type === "expense");
+  const incomeCats = data.categories.filter((c) => c.type === "income");
+  const filteredCats = filter === "expense" ? expenseCats : incomeCats;
+
+  const filteredEntries = useMemo(
+    () => data.entries.filter((e) => e.kind === filter),
+    [data.entries, filter],
+  );
+  const days = useMemo(() => groupByDay(filteredEntries), [filteredEntries]);
+
   const remove = useDeleteEntry();
 
   return (
     <div className="flex flex-col gap-10">
-      <section aria-label="Totals" className="grid grid-cols-1 gap-6 sm:grid-cols-3">
-        <Total label="Income" minor={display.convert(totals.incomeMinor)} currency={display.currency} />
-        <Total label="Expenses" minor={display.convert(totals.expenseMinor)} currency={display.currency} />
-        <Total label="Net" minor={display.convert(totals.netMinor)} currency={display.currency} signed />
+      <section aria-label="Totals">
+        <div className="grid grid-cols-2 gap-4">
+          <TotalToggle
+            label="Expenses"
+            minor={display.convert(totals.expenseMinor)}
+            currency={display.currency}
+            active={filter === "expense"}
+            onClick={() => setFilter("expense")}
+          />
+          <TotalToggle
+            label="Income"
+            minor={display.convert(totals.incomeMinor)}
+            currency={display.currency}
+            active={filter === "income"}
+            onClick={() => setFilter("income")}
+          />
+        </div>
+        <div
+          className="mt-3 flex items-baseline justify-between border-t border-rule pt-2"
+          data-testid="total-net"
+        >
+          <span className="text-sm text-muted">Net</span>
+          <Money
+            minor={display.convert(totals.netMinor)}
+            currency={display.currency}
+            signed
+            className="text-sm"
+          />
+        </div>
       </section>
+
+      {filteredCats.length > 0 && (
+        <DonutChart
+          categories={filteredCats}
+          totalMinor={filter === "expense" ? totals.expenseMinor : totals.incomeMinor}
+          display={display}
+        />
+      )}
 
       {data.waitingCount > 0 && (
         <p className="text-sm text-muted">
@@ -330,62 +638,81 @@ function MonthBody({ data, display }: { data: MonthResponse; display: DisplayCur
         />
       ) : (
         <>
-          {expense.length > 0 && (
+          {filter === "expense" && expenseCats.length > 0 && (
             <Breakdown
               title="Expenses"
-              categories={expense}
+              categories={expenseCats}
               totalMinor={totals.expenseMinor}
               display={display}
             />
           )}
-          {income.length > 0 && (
-            <Breakdown title="Income" categories={income} totalMinor={totals.incomeMinor} display={display} />
+          {filter === "income" && incomeCats.length > 0 && (
+            <Breakdown
+              title="Income"
+              categories={incomeCats}
+              totalMinor={totals.incomeMinor}
+              display={display}
+            />
           )}
-          <section aria-label="Entries" className="flex flex-col gap-6">
-            {days.map((day) => (
-              <div key={day.date}>
-                <h3 className="flex items-baseline justify-between border-b border-fg pb-1 text-sm font-medium">
-                  <span>{dayLabel(day.date)}</span>
-                  <Money
-                    minor={display.convert(day.netMinor)}
-                    currency={display.currency}
-                    signed
-                    className="text-muted"
-                  />
-                </h3>
-                <ul>
-                  {day.entries.map((entry) => (
-                    <EntryRow key={entry.id} entry={entry} onDelete={remove.mutateAsync} />
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </section>
+          {filteredEntries.length > 0 ? (
+            <section aria-label="Entries" className="flex flex-col gap-6">
+              {days.map((day) => (
+                <div key={day.date}>
+                  <h3 className="flex items-baseline justify-between border-b border-fg pb-1 text-sm font-medium">
+                    <span>{dayLabel(day.date)}</span>
+                    <Money
+                      minor={display.convert(day.netMinor)}
+                      currency={display.currency}
+                      signed
+                      className="text-muted"
+                    />
+                  </h3>
+                  <ul>
+                    {day.entries.map((entry) => (
+                      <EntryRow key={entry.id} entry={entry} onDelete={remove.mutateAsync} />
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </section>
+          ) : (
+            <p className="text-sm text-muted">
+              No {filter === "expense" ? "expenses" : "income"} this month.
+            </p>
+          )}
         </>
       )}
     </div>
   );
 }
 
-function Total({
+function TotalToggle({
   label,
   minor,
   currency,
-  signed = false,
+  active,
+  onClick,
 }: {
   label: string;
   minor: number;
   currency: CurrencyCode;
-  signed?: boolean;
+  active: boolean;
+  onClick: () => void;
 }) {
   return (
-    <div
-      className="flex flex-col gap-1 border-t border-rule pt-3"
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "flex flex-col gap-1 rounded-lg border px-4 pt-3 pb-4 text-left transition-colors",
+        active ? "border-fg bg-fg text-bg" : "border-rule bg-surface text-fg hover:border-fg",
+      )}
       data-testid={`total-${label.toLowerCase()}`}
     >
-      <span className="text-sm text-muted">{label}</span>
-      <Money minor={minor} currency={currency} signed={signed} className="text-3xl md:text-4xl" />
-    </div>
+      <span className={cn("text-sm", active ? "text-bg/70" : "text-muted")}>{label}</span>
+      <Money minor={minor} currency={currency} className="text-2xl md:text-3xl" />
+    </button>
   );
 }
 
